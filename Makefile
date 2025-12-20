@@ -38,7 +38,7 @@ run: build
 ## test: Run all tests
 test:
 	@echo "Running tests..."
-	@go test -v ./...
+	@go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 	@echo "✓ Tests passed"
 
 ## bench: Run benchmarks
