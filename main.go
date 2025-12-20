@@ -663,62 +663,62 @@ func WithTenantAndUser(tenantID, userID uint64) PartialKey {
 	return PartialKey{TenantID: &tenantID, UserID: &userID}
 }
 
-// // Example usage
-// func main() {
-// 	fmt.Println("=== Enhanced Structured Key-Value Store Demo ===")
+// Example usage
+func main() {
+	fmt.Println("=== Enhanced Structured Key-Value Store Demo ===")
 	
-// 	store, err := NewStore("./data")
-// 	if err != nil {
-// 		fmt.Printf("Error creating store: %v\n", err)
-// 		return
-// 	}
-// 	defer store.Close()
+	store, err := NewStore("./data")
+	if err != nil {
+		fmt.Printf("Error creating store: %v\n", err)
+		return
+	}
+	defer store.Close()
 	
-// 	// Example 1: Set with TTL
-// 	fmt.Println("Example 1: Set entries with TTL")
-// 	for i := range 5 {
-// 		key := CompoundKey{
-// 			TenantID:  1,
-// 			UserID:    uint64(100 + i),
-// 			Resource:  "session",
-// 			Timestamp: time.Now().Unix(),
-// 		}
-// 		store.Set(key, fmt.Sprintf("session_data_%d", i), 5*time.Second)
-// 	}
-// 	fmt.Printf("Added 5 entries with 5-second TTL\n\n")
+	// Example 1: Set with TTL
+	fmt.Println("Example 1: Set entries with TTL")
+	for i := range 5 {
+		key := CompoundKey{
+			TenantID:  1,
+			UserID:    uint64(100 + i),
+			Resource:  "session",
+			Timestamp: time.Now().Unix(),
+		}
+		store.Set(key, fmt.Sprintf("session_data_%d", i), 5*time.Second)
+	}
+	fmt.Printf("Added 5 entries with 5-second TTL\n\n")
 	
-// 	// Example 2: Range query
-// 	fmt.Println("Example 2: Range query by timestamp")
-// 	now := time.Now().Unix()
-// 	for i := range 10 {
-// 		key := CompoundKey{
-// 			TenantID:  2,
-// 			UserID:    200,
-// 			Resource:  "event",
-// 			Timestamp: now + int64(i*10), // Events at 10-second intervals
-// 		}
-// 		store.Set(key, fmt.Sprintf("event_%d", i), 0) // No TTL
-// 	}
+	// Example 2: Range query
+	fmt.Println("Example 2: Range query by timestamp")
+	now := time.Now().Unix()
+	for i := range 10 {
+		key := CompoundKey{
+			TenantID:  2,
+			UserID:    200,
+			Resource:  "event",
+			Timestamp: now + int64(i*10), // Events at 10-second intervals
+		}
+		store.Set(key, fmt.Sprintf("event_%d", i), 0) // No TTL
+	}
 	
-// 	results := store.RangeQuery(now, now+50, PartialKey{})
-// 	fmt.Printf("Found %d events in time range [%d, %d]\n", len(results), now, now+50)
-// 	for key := range results {
-// 		fmt.Printf("  - Timestamp: %d\n", key.Timestamp)
-// 	}
-// 	fmt.Println()
+	results := store.RangeQuery(now, now+50, PartialKey{})
+	fmt.Printf("Found %d events in time range [%d, %d]\n", len(results), now, now+50)
+	for key := range results {
+		fmt.Printf("  - Timestamp: %d\n", key.Timestamp)
+	}
+	fmt.Println()
 	
-// 	// Example 3: Wait for TTL expiration
-// 	fmt.Println("Example 3: Waiting for TTL expiration...")
-// 	time.Sleep(6 * time.Second)
+	// Example 3: Wait for TTL expiration
+	fmt.Println("Example 3: Waiting for TTL expiration...")
+	time.Sleep(6 * time.Second)
 	
-// 	results = store.Query(WithTenant(1))
-// 	fmt.Printf("After 6 seconds, tenant 1 has %d entries (should be 0)\n\n", len(results))
+	results = store.Query(WithTenant(1))
+	fmt.Printf("After 6 seconds, tenant 1 has %d entries (should be 0)\n\n", len(results))
 	
-// 	// Example 4: Persistence
-// 	fmt.Println("Example 4: Creating snapshot...")
-// 	if err := store.CreateSnapshot(); err != nil {
-// 		fmt.Printf("Error creating snapshot: %v\n", err)
-// 	}
+	// Example 4: Persistence
+	fmt.Println("Example 4: Creating snapshot...")
+	if err := store.CreateSnapshot(); err != nil {
+		fmt.Printf("Error creating snapshot: %v\n", err)
+	}
 	
-// 	fmt.Printf("\nFinal stats: %+v\n", store.Stats())
-// }
+	fmt.Printf("\nFinal stats: %+v\n", store.Stats())
+}

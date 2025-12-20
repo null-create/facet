@@ -1,4 +1,5 @@
 .vscode
 .idea
 .local
+bin
 test_data_*

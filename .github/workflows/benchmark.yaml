@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0 # Fetch all history for comparison
 
@@ -25,12 +25,12 @@ jobs:
 
       - name: Install protoc
         run: |
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y protobuf-compiler
 
       - name: Install protoc-gen-go
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go get google.golang.org/protobuf/cmd/protoc-gen-go@latest
           export PATH="$PATH:$(go env GOPATH)/bin"
 
       - name: Download dependencies
