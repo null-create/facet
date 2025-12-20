@@ -1,0 +1,4 @@
+.vscode
+.idea
+.local
+test_data_*

@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package facet;
+
+option go_package = "github.com/null-create/facet/proto";
+
+// CompoundKey message
+message CompoundKey {
+  uint64 tenant_id = 1;
+  uint64 user_id = 2;
+  string resource = 3;
+  int64 timestamp = 4;
+}
+
+// Entry message for storage
+message Entry {
+  CompoundKey key = 1;
+  bytes value = 2;
+  int64 insert_time = 3; // Unix timestamp
+  int64 ttl = 4; // Time-to-live in seconds (0 = no expiration)
+}
+
+// WAL operation types
+enum OperationType {
+  SET = 0;
+  DELETE = 1;
+}
+
+// Write-Ahead Log entry
+message WALEntry {
+  OperationType op_type = 1;
+  CompoundKey key = 2;
+  bytes value = 3;
+  int64 ttl = 4;
+  int64 timestamp = 5; // When operation occurred
+}
+
+// Snapshot of entire store
+message Snapshot {
+  repeated Entry entries = 1;
+  int64 timestamp = 2; // When snapshot was taken
+  uint64 wal_offset = 3; // Last WAL entry included
+}
+
+// Partial key for queries (stored in WAL for delete operations)
+message PartialKey {
+  uint64 tenant_id = 1;
+  uint64 user_id = 2;
+  string resource = 3;
+  int64 timestamp = 4;
+}
+
+// Delete operation with partial key
+message DeleteOperation {
+  PartialKey partial = 1;
+  int64 timestamp = 2;
+}
