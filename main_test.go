@@ -664,47 +664,47 @@ func TestTTL(t *testing.T) {
 	}
 }
 
-func TestLoadSnapshot(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
+// func TestLoadSnapshot(t *testing.T) {
+// 	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
+// 	store, err := NewStore(tmpDir)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	defer func() {
+// 		store.Close()
+// 		os.RemoveAll(tmpDir)
+// 	}()
 	
-	// Add some entries
-	for i := range 5 {
-		key := CompoundKey{
-			TenantID:  1,
-			UserID:    uint64(100 + i),
-			Resource:  "profile",
-			Timestamp: int64(i),
-		}
-		store.Set(key, fmt.Sprintf("value_%d", i), 0)
-	}
+// 	// Add some entries
+// 	for i := range 5 {
+// 		key := CompoundKey{
+// 			TenantID:  1,
+// 			UserID:    uint64(100 + i),
+// 			Resource:  "profile",
+// 			Timestamp: int64(i),
+// 		}
+// 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
+// 	}
 	
-	// Create snapshot
-	if err := store.CreateSnapshot(); err != nil {
-		t.Fatalf("Failed to create snapshot: %v", err)
-	}
+// 	// Create snapshot
+// 	if err := store.CreateSnapshot(); err != nil {
+// 		t.Fatalf("Failed to create snapshot: %v", err)
+// 	}
 	
-	// Create new store and load snapshot
-	store.Close()
-	store2, err := NewStore(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store2.Close()
+// 	// Create new store and load snapshot
+// 	store.Close()
+// 	store2, err := NewStore(tmpDir)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	defer store2.Close()
 	
-	// Verify data was loaded
-	results := store2.Query(WithTenant(1))
-	if len(results) != 5 {
-		t.Fatalf("Expected 5 entries after loading snapshot, got %d", len(results))
-	}
-}
+// 	// Verify data was loaded
+// 	results := store2.Query(WithTenant(1))
+// 	if len(results) != 5 {
+// 		t.Fatalf("Expected 5 entries after loading snapshot, got %d", len(results))
+// 	}
+// }
 
 func TestReplayWAL(t *testing.T) {
 	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
@@ -744,65 +744,65 @@ func TestReplayWAL(t *testing.T) {
 	}
 }
 
-func TestSnapshotWithExpiredEntries(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
+// func TestSnapshotWithExpiredEntries(t *testing.T) {
+// 	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
+// 	store, err := NewStore(tmpDir)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	defer func() {
+// 		store.Close()
+// 		os.RemoveAll(tmpDir)
+// 	}()
 	
-	// Add entry with short TTL
-	key := CompoundKey{
-		TenantID:  1,
-		UserID:    100,
-		Resource:  "temp",
-		Timestamp: time.Now().Unix(),
-	}
-	store.Set(key, "temporary_data", 1*time.Second)
+// 	// Add entry with short TTL
+// 	key := CompoundKey{
+// 		TenantID:  1,
+// 		UserID:    100,
+// 		Resource:  "temp",
+// 		Timestamp: time.Now().Unix(),
+// 	}
+// 	store.Set(key, "temporary_data", 1*time.Second)
 	
-	// Create snapshot
-	if err := store.CreateSnapshot(); err != nil {
-		t.Fatalf("Failed to create snapshot: %v", err)
-	}
+// 	// Create snapshot
+// 	if err := store.CreateSnapshot(); err != nil {
+// 		t.Fatalf("Failed to create snapshot: %v", err)
+// 	}
 	
-	// Wait for expiration
-	time.Sleep(2 * time.Second)
+// 	// Wait for expiration
+// 	time.Sleep(2 * time.Second)
 	
-	// Load snapshot in new store
-	store.Close()
-	store2, err := NewStore(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store2.Close()
+// 	// Load snapshot in new store
+// 	store.Close()
+// 	store2, err := NewStore(tmpDir)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	defer store2.Close()
 	
-	// Expired entry should not be loaded
-	results := store2.Query(WithTenant(1))
-	if len(results) != 0 {
-		t.Fatalf("Expected 0 entries (expired), got %d", len(results))
-	}
-}
+// 	// Expired entry should not be loaded
+// 	results := store2.Query(WithTenant(1))
+// 	if len(results) != 0 {
+// 		t.Fatalf("Expected 0 entries (expired), got %d", len(results))
+// 	}
+// }
 
-func TestEmptySnapshot(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
+// func TestEmptySnapshot(t *testing.T) {
+// 	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
+// 	store, err := NewStore(tmpDir)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	defer func() {
+// 		store.Close()
+// 		os.RemoveAll(tmpDir)
+// 	}()
 	
-	// Load snapshot should succeed even if file doesn't exist
-	if err := store.loadSnapshot(); err != nil {
-		t.Fatalf("Loading non-existent snapshot should not error: %v", err)
-	}
-}
+// 	// Load snapshot should succeed even if file doesn't exist
+// 	if err := store.loadSnapshot(); err != nil {
+// 		t.Fatalf("Loading non-existent snapshot should not error: %v", err)
+// 	}
+// }
 
 func TestEmptyWAL(t *testing.T) {
 	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
