@@ -23,15 +23,11 @@ jobs:
         with:
           go-version: "stable"
 
-      - name: Install protoc
+      - name: Install protoc and protoc-gen-go
         run: |
           sudo apt-get update -y
           sudo apt-get install -y protobuf-compiler
-
-      - name: Install protoc-gen-go
-        run: |
-          go get google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          export PATH="$PATH:$(go env GOPATH)/bin"
+          sudo apt-get install -y protoc-gen-go
 
       - name: Download dependencies
         run: go mod download
