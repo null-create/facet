@@ -843,8 +843,74 @@ func (s *Store) CreateSnapshot() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	
-	// In production, serialize to protobuf and write snapshot file
-	fmt.Printf("Creating snapshot with %d entries...\n", len(s.data))
+	var buf bytes.Buffer
+	
+	// Write number of entries
+	entryCount := uint32(len(s.data))
+	if err := binary.Write(&buf, binary.BigEndian, entryCount); err != nil {
+		return fmt.Errorf("failed to write entry count: %w", err)
+	}
+	
+	// Write each entry
+	for _, entry := range s.data {
+		// Skip expired entries
+		if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
+			continue
+		}
+		
+		// Write tenant ID
+		if err := binary.Write(&buf, binary.BigEndian, entry.key.TenantID); err != nil {
+			return fmt.Errorf("failed to write tenant ID: %w", err)
+		}
+		
+		// Write user ID
+		if err := binary.Write(&buf, binary.BigEndian, entry.key.UserID); err != nil {
+			return fmt.Errorf("failed to write user ID: %w", err)
+		}
+		
+		// Write resource (length-prefixed string)
+		resourceBytes := []byte(entry.key.Resource)
+		if err := binary.Write(&buf, binary.BigEndian, uint32(len(resourceBytes))); err != nil {
+			return fmt.Errorf("failed to write resource length: %w", err)
+		}
+		if _, err := buf.Write(resourceBytes); err != nil {
+			return fmt.Errorf("failed to write resource: %w", err)
+		}
+		
+		// Write timestamp
+		if err := binary.Write(&buf, binary.BigEndian, entry.key.Timestamp); err != nil {
+			return fmt.Errorf("failed to write timestamp: %w", err)
+		}
+		
+		// Write value (length-prefixed)
+		valueBytes := []byte(fmt.Sprintf("%v", entry.value))
+		if err := binary.Write(&buf, binary.BigEndian, uint32(len(valueBytes))); err != nil {
+			return fmt.Errorf("failed to write value length: %w", err)
+		}
+		if _, err := buf.Write(valueBytes); err != nil {
+			return fmt.Errorf("failed to write value: %w", err)
+		}
+		
+		// Write insert time
+		if err := binary.Write(&buf, binary.BigEndian, entry.insertTime.Unix()); err != nil {
+			return fmt.Errorf("failed to write insert time: %w", err)
+		}
+		
+		// Write TTL
+		if err := binary.Write(&buf, binary.BigEndian, int64(entry.ttl.Seconds())); err != nil {
+			return fmt.Errorf("failed to write TTL: %w", err)
+		}
+	}
+	
+	// Write to temporary file then rename (atomic)
+	tempPath := s.snapshotPath + ".tmp"
+	if err := os.WriteFile(tempPath, buf.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write snapshot file: %w", err)
+	}
+	
+	if err := os.Rename(tempPath, s.snapshotPath); err != nil {
+		return fmt.Errorf("failed to rename snapshot file: %w", err)
+	}
 	
 	return nil
 }
