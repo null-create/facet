@@ -84,6 +84,8 @@ type Store struct {
 	walPath      string
 	snapshotPath string
 	walOffset    uint64
+	walEnabled   bool 
+	snapShotEnabled bool
 	
 	// TTL management
 	ttlHeap      *TTLHeap
@@ -93,7 +95,7 @@ type Store struct {
 
 type entry struct {
 	key       CompoundKey
-	value     interface{}
+	value     any
 	insertTime time.Time
 	ttl       time.Duration // 0 means no expiration
 }
@@ -252,22 +254,25 @@ func (h *TTLHeap) bubbleDown(idx int) {
 }
 
 // NewStore creates a new structured key-value store
+// with Write Ahead Logging and snapshots
 func NewStore(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 	
 	store := &Store{
-		data:           make(map[uint64]*entry),
-		tenantIndex:    make(map[uint64]map[uint64]bool),
-		userIndex:      make(map[uint64]map[uint64]bool),
-		resourceIndex:  make(map[string]map[uint64]bool),
-		keyMap:         make(map[uint64]CompoundKey),
-		timestampIndex: NewTimestampIndex(),
-		ttlHeap:        NewTTLHeap(),
-		walPath:        filepath.Join(dataDir, "wal.log"),
-		snapshotPath:   filepath.Join(dataDir, "snapshot.pb"),
-		stopCleanup:    make(chan bool),
+		data:            make(map[uint64]*entry),
+		tenantIndex:     make(map[uint64]map[uint64]bool),
+		userIndex:       make(map[uint64]map[uint64]bool),
+		resourceIndex:   make(map[string]map[uint64]bool),
+		keyMap:          make(map[uint64]CompoundKey),
+		timestampIndex:  NewTimestampIndex(),
+		ttlHeap:         NewTTLHeap(),
+		walPath:         filepath.Join(dataDir, "wal.log"),
+		snapShotEnabled: true,
+		snapshotPath:    filepath.Join(dataDir, "snapshot.pb"),
+		stopCleanup:     make(chan bool),
+		walEnabled:      true,
 	}
 	
 	// Load from disk
@@ -288,21 +293,75 @@ func NewStore(dataDir string) (*Store, error) {
 	return store, nil
 }
 
+type StoreOpts struct {
+	WalEnabled        bool
+	SnapshotsEnabled  bool 
+}
+
+// Create a store with or without WAL or snapshots
+func NewStoreWithOpts(dataDir string, opts StoreOpts) (*Store, error) {
+	if opts.WalEnabled || opts.SnapshotsEnabled {
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create data directory: %w", err)
+		}
+	}
+	
+	store := &Store{
+		data:            make(map[uint64]*entry),
+		tenantIndex:     make(map[uint64]map[uint64]bool),
+		userIndex:       make(map[uint64]map[uint64]bool),
+		resourceIndex:   make(map[string]map[uint64]bool),
+		keyMap:          make(map[uint64]CompoundKey),
+		timestampIndex:  NewTimestampIndex(),
+		ttlHeap:         NewTTLHeap(),
+		walEnabled:      opts.WalEnabled,
+		walPath:         filepath.Join(dataDir, "wal.log"),
+		snapShotEnabled: opts.SnapshotsEnabled,
+		snapshotPath:    filepath.Join(dataDir, "snapshot.pb"),
+		stopCleanup:     make(chan bool),
+	}
+	
+	// Load from disk if needed
+	if store.snapShotEnabled {
+		if err := store.loadFromDisk(); err != nil {
+			return nil, fmt.Errorf("failed to load from disk: %w", err)
+		}
+	}
+
+	// Open WAL for appending if needed
+	if store.walEnabled {
+		walFile, err := os.OpenFile(store.walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open WAL: %w", err)
+		}
+		store.walFile = walFile
+	}
+
+	// Start TTL cleanup goroutine
+	store.startTTLCleanup()
+	
+	return store, nil
+}
+
 func (s *Store) loadFromDisk() error {
 	// Load snapshot if exists
-	if _, err := os.Stat(s.snapshotPath); err == nil {
-		if err := s.loadSnapshot(); err != nil {
-			return fmt.Errorf("failed to load snapshot: %w", err)
+	if s.snapShotEnabled {
+		if _, err := os.Stat(s.snapshotPath); err == nil {
+			if err := s.loadSnapshot(); err != nil {
+				return fmt.Errorf("failed to load snapshot: %w", err)
+			}
 		}
 	}
-	
-	// Replay WAL if exists
-	if _, err := os.Stat(s.walPath); err == nil {
-		if err := s.replayWAL(); err != nil {
-			return fmt.Errorf("failed to replay WAL: %w", err)
+
+	// Replay WAL if enabled and exists
+	if s.walEnabled {
+		if _, err := os.Stat(s.walPath); err == nil {
+			if err := s.replayWAL(); err != nil {
+				return fmt.Errorf("failed to replay WAL: %w", err)
+			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -441,6 +500,10 @@ func (s *Store) loadSnapshot() error {
 }
 
 func (s *Store) replayWAL() error {
+	if !s.walEnabled {
+		return nil
+	}
+
 	file, err := os.Open(s.walPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -636,7 +699,7 @@ func (s *Store) Set(key CompoundKey, value interface{}, ttl time.Duration) {
 }
 
 func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time.Duration) {
-	if s.walFile == nil {
+	if s.walFile == nil || !s.walEnabled {
 		return // WAL not enabled
 	}
 	
@@ -840,9 +903,13 @@ func (s *Store) Delete(partial PartialKey) int {
 
 // CreateSnapshot creates a snapshot of the current store state
 func (s *Store) CreateSnapshot() error {
+	if !s.snapShotEnabled {
+		return nil
+	}
+	
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	var buf bytes.Buffer
 	
 	// Write number of entries

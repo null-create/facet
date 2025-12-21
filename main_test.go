@@ -11,7 +11,10 @@ import (
 // Helper to create a test store
 func createTestStore(t *testing.B) *Store {
 	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
+	store, err := NewStoreWithOpts(tmpDir, StoreOpts{
+		WalEnabled:       false,
+		SnapshotsEnabled: false,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -833,7 +836,7 @@ func TestDelete(t *testing.T) {
 	}()
 	
 	// Add entries
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := CompoundKey{
 			TenantID:  1,
 			UserID:    uint64(i),
