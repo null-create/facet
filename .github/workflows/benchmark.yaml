@@ -2,6 +2,18 @@ name: Benchmark
 
 on:
   workflow_dispatch:
+    inputs:
+      type:
+        description: "Benchmark type to run"
+        required: true
+        default: "standard"
+        type: choice
+        options:
+          - standard
+          - cpu
+          - mem
+          - all
+          - trace
 
 jobs:
   benchmark:
@@ -31,5 +43,42 @@ jobs:
       - name: Generate protobuf code
         run: make proto
 
-      - name: Run benchmarks
-        run: make bench
+      - name: Run standard benchmarks
+        if: inputs.type == 'standard'
+        run: make bench | tee benchmark.txt
+
+      - name: Run CPU profiling benchmarks
+        if: inputs.type == 'cpu'
+        run: |
+          make bench-cpu | tee benchmark.txt
+          go tool pprof -top cpu.prof | tee cpu-analysis.txt
+
+      - name: Run memory profiling benchmarks
+        if: inputs.type == 'mem'
+        run: |
+          make bench-mem | tee benchmark.txt
+          go tool pprof -top mem.prof | tee mem-analysis.txt
+
+      - name: Run all profiling benchmarks
+        if: inputs.type == 'all'
+        run: |
+          make bench-all | tee benchmark.txt
+          go tool pprof -top cpu.prof | tee cpu-analysis.txt
+          go tool pprof -top mem.prof | tee mem-analysis.txt
+          go tool pprof -top mutex.prof | tee mutex-analysis.txt
+          go tool pprof -top block.prof | tee block-analysis.txt
+
+      - name: Run trace benchmarks
+        if: inputs.type == 'trace'
+        run: make bench-trace | tee benchmark.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ inputs.type }}
+          path: |
+            benchmark.txt
+            *.prof
+            *-analysis.txt
+            trace.out
+          retention-days: 30
