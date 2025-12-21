@@ -47,6 +47,47 @@ bench:
 	@go test -bench=. -benchmem -benchtime=3s
 	@echo "✓ Benchmarks complete"
 
+## bench: Run benchmarks
+bench:
+	@echo "Running benchmarks..."
+	@go test -bench=. -benchmem -benchtime=3s
+	@echo "✓ Benchmarks complete"
+
+## bench-cpu: Run benchmarks with CPU profiling
+bench-cpu:
+	@echo "Running benchmarks with CPU profiling..."
+	@go test -bench=. -benchmem -benchtime=3s -cpuprofile=cpu.prof
+	@echo "✓ CPU profile saved to cpu.prof"
+	@echo "Analyze with: go tool pprof cpu.prof"
+
+## bench-mem: Run benchmarks with memory profiling
+bench-mem:
+	@echo "Running benchmarks with memory profiling..."
+	@go test -bench=. -benchmem -benchtime=3s -memprofile=mem.prof
+	@echo "✓ Memory profile saved to mem.prof"
+	@echo "Analyze with: go tool pprof mem.prof"
+
+## bench-all: Run benchmarks with all profiling
+bench-all:
+	@echo "Running benchmarks with full profiling..."
+	@go test -bench=. -benchmem -benchtime=3s \
+		-cpuprofile=cpu.prof \
+		-memprofile=mem.prof \
+		-mutexprofile=mutex.prof \
+		-blockprofile=block.prof
+	@echo "✓ All profiles saved"
+	@echo "CPU:   go tool pprof cpu.prof"
+	@echo "Mem:   go tool pprof mem.prof"
+	@echo "Mutex: go tool pprof mutex.prof"
+	@echo "Block: go tool pprof block.prof"
+
+## bench-trace: Run benchmarks with execution trace
+bench-trace:
+	@echo "Running benchmarks with trace..."
+	@go test -bench=BenchmarkMixedWorkload -benchtime=10s -trace=trace.out
+	@echo "✓ Trace saved to trace.out"
+	@echo "View with: go tool trace trace.out"
+
 ## clean: Remove build artifacts and test data
 clean:
 	@echo "Cleaning..."
