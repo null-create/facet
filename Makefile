@@ -47,12 +47,6 @@ bench:
 	@go test -bench=. -benchmem -benchtime=3s
 	@echo "✓ Benchmarks complete"
 
-## bench: Run benchmarks
-bench:
-	@echo "Running benchmarks..."
-	@go test -bench=. -benchmem -benchtime=3s
-	@echo "✓ Benchmarks complete"
-
 ## bench-cpu: Run benchmarks with CPU profiling
 bench-cpu:
 	@echo "Running benchmarks with CPU profiling..."
