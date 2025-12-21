@@ -16,6 +16,45 @@ Facet is an in-memory key-value store that supports multi-dimensional compound k
 
 The name "Facet" reflects the multi-dimensional nature of the store - like facets on a jewel, each index reveals a different view of the data, allowing queries to access information from multiple angles efficiently.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Implementation Details](#implementation-details)
+  - [Core Data Structures](#core-data-structures)
+  - [Storage Architecture](#storage-architecture)
+- [Algorithms and Techniques](#algorithms-and-techniques)
+  - [1. Hash-Based Primary Storage](#1-hash-based-primary-storage)
+  - [2. Inverted Index for Partial Queries](#2-inverted-index-for-partial-queries)
+  - [3. B-tree Index for Range Queries](#3-b-tree-index-for-range-queries)
+  - [4. Min-Heap for TTL Management](#4-min-heap-for-ttl-management)
+  - [5. Query Optimization via Index Selection](#5-query-optimization-via-index-selection)
+  - [6. Concurrency Control](#6-concurrency-control)
+- [Serialization Strategy](#serialization-strategy)
+- [Persistence Architecture](#persistence-architecture)
+  - [Write-Ahead Log (WAL)](#write-ahead-log-wal)
+  - [Snapshots](#snapshots)
+- [Comparison to Existing Solutions](#comparison-to-existing-solutions)
+  - [vs. Redis](#vs-redis)
+  - [vs. Memcached](#vs-memcached)
+  - [vs. PostgreSQL/MySQL with Composite Keys](#vs-postgresqlmysql-with-composite-keys)
+  - [vs. DynamoDB/Cassandra](#vs-dynamodbcassandra)
+- [Benchmarking Results](#benchmarking-results)
+  - [Core Operations](#core-operations-without-persistence)
+  - [Partial Query Performance](#partial-query-performance)
+  - [Range Query Performance](#range-query-performance)
+  - [Scalability Testing](#scalability-testing)
+  - [Concurrent Performance](#concurrent-performance-12-threads)
+  - [Memory Usage](#memory-usage)
+  - [With Persistence](#with-persistence-wal-enabled)
+  - [Performance Summary](#performance-summary)
+- [Known Limitations and Future Enhancements](#known-limitations-and-future-enhancements)
+  - [Current Limitations](#current-limitations)
+  - [Future Enhancements](#future-enhancements)
+- [Performance Validation](#performance-validation)
+- [Architecture Decisions Summary](#architecture-decisions-summary)
+- [Conclusion](#conclusion)
+- [References](#references)
+
 ## Implementation Details
 
 ### Core Data Structures
