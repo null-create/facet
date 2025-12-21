@@ -44,27 +44,27 @@ test:
 ## bench: Run benchmarks
 bench:
 	@echo "Running benchmarks..."
-	@go test -bench=. -benchmem -benchtime=3s
+	@go test -bench=. -benchmem -benchtime=10s
 	@echo "✓ Benchmarks complete"
 
 ## bench-cpu: Run benchmarks with CPU profiling
 bench-cpu:
 	@echo "Running benchmarks with CPU profiling..."
-	@go test -bench=. -benchmem -benchtime=3s -cpuprofile=cpu.prof
+	@go test -bench=. -benchmem -benchtime=10s -cpuprofile=cpu.prof
 	@echo "✓ CPU profile saved to cpu.prof"
 	@echo "Analyze with: go tool pprof cpu.prof"
 
 ## bench-mem: Run benchmarks with memory profiling
 bench-mem:
 	@echo "Running benchmarks with memory profiling..."
-	@go test -bench=. -benchmem -benchtime=3s -memprofile=mem.prof
+	@go test -bench=. -benchmem -benchtime=10s -memprofile=mem.prof
 	@echo "✓ Memory profile saved to mem.prof"
 	@echo "Analyze with: go tool pprof mem.prof"
 
 ## bench-all: Run benchmarks with all profiling
 bench-all:
 	@echo "Running benchmarks with full profiling..."
-	@go test -bench=. -benchmem -benchtime=3s \
+	@go test -bench=. -benchmem -benchtime=10s \
 		-cpuprofile=cpu.prof \
 		-memprofile=mem.prof \
 		-mutexprofile=mutex.prof \
