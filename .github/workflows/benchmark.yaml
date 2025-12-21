@@ -32,14 +32,4 @@ jobs:
         run: make proto
 
       - name: Run benchmarks
-        run: |
-          go test -bench=. -benchmem -benchtime=3s | tee benchmark.txt
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark.txt
-
-      - name: Display results
-        run: cat benchmark.txt
+        run: make bench
