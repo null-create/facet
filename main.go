@@ -765,10 +765,11 @@ func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time
 	
 	s.walOffset++
 }
+
 // Get retrieves a value by exact compound key
 func (s *Store) Get(key CompoundKey) (any, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	
 	hash := key.Hash()
 	if entry, ok := s.data[hash]; ok {
