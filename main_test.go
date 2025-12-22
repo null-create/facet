@@ -324,41 +324,39 @@ func BenchmarkKeyToBytes(b *testing.B) {
 	}
 }
 
-// Comparative benchmark: Simulate Redis-style string key operations
-func BenchmarkStringKeySet(b *testing.B) {
-	store := make(map[string]interface{})
+// // Comparative benchmark: Simulate Redis-style string key operations
+// func BenchmarkStringKeySet(b *testing.B) {
+// 	store := make(map[string]any)
 	
-	
-	for i := 0; b.Loop(); i++ {
-		key := fmt.Sprintf("tenant:%d:user:%d:resource:%s:ts:%d",
-			i%100, i, fmt.Sprintf("resource_%d", i%10), time.Now().Unix())
-		store[key] = fmt.Sprintf("value_%d", i)
-	}
-}
+// 	for i := 0; b.Loop(); i++ {
+// 		key := fmt.Sprintf("tenant:%d:user:%d:resource:%s:ts:%d",
+// 			i%100, i, fmt.Sprintf("resource_%d", i%10), time.Now().Unix())
+// 		store[key] = fmt.Sprintf("value_%d", i)
+// 	}
+// }
 
-// Comparative benchmark: Simulate Redis SCAN for partial matches
-func BenchmarkStringKeyScan(b *testing.B) {
-	store := make(map[string]interface{})
+// // Comparative benchmark: Simulate Redis SCAN for partial matches
+// func BenchmarkStringKeyScan(b *testing.B) {
+// 	store := make(map[string]any)
 	
-	// Prepopulate
-	for i := range 100000 {
-		key := fmt.Sprintf("tenant:%d:user:%d:resource:%s",
-			i%100, i, fmt.Sprintf("resource_%d", i%10))
-		store[key] = fmt.Sprintf("value_%d", i)
-	}
+// 	// Prepopulate
+// 	for i := range 100000 {
+// 		key := fmt.Sprintf("tenant:%d:user:%d:resource:%s",
+// 			i%100, i, fmt.Sprintf("resource_%d", i%10))
+// 		store[key] = fmt.Sprintf("value_%d", i)
+// 	}
 	
-	
-	for i := 0; b.Loop(); i++ {
-		// Simulate SCAN with pattern matching
-		pattern := fmt.Sprintf("tenant:%d:", i%100)
-		results := make([]any, 0)
-		for k, v := range store {
-			if len(k) >= len(pattern) && k[:len(pattern)] == pattern {
-				results = append(results, v)
-			}
-		}
-	}
-}
+// 	for i := 0; b.Loop(); i++ {
+// 		// Simulate SCAN with pattern matching
+// 		pattern := fmt.Sprintf("tenant:%d:", i%100)
+// 		results := make([]any, 0)
+// 		for k, v := range store {
+// 			if len(k) >= len(pattern) && k[:len(pattern)] == pattern {
+// 				results = append(results, v)
+// 			}
+// 		}
+// 	}
+// }
 
 // BenchmarkTTLCleanup measures TTL cleanup overhead
 func BenchmarkTTLCleanup(b *testing.B) {
@@ -375,7 +373,6 @@ func BenchmarkTTLCleanup(b *testing.B) {
 		}
 		store.Set(key, "value", 100*time.Millisecond)
 	}
-	
 	
 	for b.Loop() {
 		time.Sleep(150 * time.Millisecond)
@@ -587,8 +584,8 @@ func TestPartialQuery(t *testing.T) {
 	
 	// Query by tenant
 	results := store.Query(WithTenant(1))
-	if len(results) != 10 {
-		t.Fatalf("Expected 10 results, got %d", len(results))
+	if len(results.keys) != 10 {
+		t.Fatalf("Expected 10 results, got %d", len(results.keys))
 	}
 }
 
@@ -738,8 +735,8 @@ func TestReplayWAL(t *testing.T) {
 	
 	// Verify data was replayed from WAL
 	results := store2.Query(WithTenant(1))
-	if len(results) != 3 {
-		t.Fatalf("Expected 3 entries after replaying WAL, got %d", len(results))
+	if len(results.keys) != 3 {
+		t.Fatalf("Expected 3 entries after replaying WAL, got %d", len(results.keys))
 	}
 }
 
@@ -850,8 +847,8 @@ func TestDelete(t *testing.T) {
 	
 	// Verify deletion
 	results := store.Query(WithTenant(1))
-	if len(results) != 0 {
-		t.Fatalf("Expected 0 results after deletion, got %d", len(results))
+	if len(results.keys) != 0 {
+		t.Fatalf("Expected 0 results after deletion, got %d", len(results.keys))
 	}
 }
 
@@ -897,7 +894,7 @@ func TestConcurrency(t *testing.T) {
 	
 	// Verify final state
 	results := store.Query(WithTenant(1))
-	if len(results) == 0 {
+	if len(results.keys) == 0 {
 		t.Fatal("Expected entries after concurrent operations")
 	}
 }

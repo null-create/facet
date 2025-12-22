@@ -15,21 +15,28 @@ import (
 
 // CompoundKey represents a multi-dimensional cache key
 type CompoundKey struct {
-	TenantID  uint64
-	UserID    uint64
-	Resource  string
-	Timestamp int64
+	TenantID    uint64
+	UserID      uint64
+	Resource    string
+	Timestamp   int64
+	KeyBytes    string  // Cached serialization
+	bytesValid  bool
 }
 
 // ToBytes serializes the key for hashing
 func (k CompoundKey) ToBytes() []byte {
-	buf := make([]byte, 16+len(k.Resource)+8)
-	binary.BigEndian.PutUint64(buf[0:8], k.TenantID)
-	binary.BigEndian.PutUint64(buf[8:16], k.UserID)
-	copy(buf[16:], []byte(k.Resource))
-	binary.BigEndian.PutUint64(buf[16+len(k.Resource):], uint64(k.Timestamp))
-	return buf
+	if !k.bytesValid {
+		buf := make([]byte, 16+len(k.Resource)+8)
+		binary.BigEndian.PutUint64(buf[0:8], k.TenantID)
+		binary.BigEndian.PutUint64(buf[8:16], k.UserID)
+		copy(buf[16:], []byte(k.Resource))
+		binary.BigEndian.PutUint64(buf[16+len(k.Resource):], uint64(k.Timestamp))
+		k.KeyBytes = string(buf)
+		k.bytesValid = true
+	}
+	return []byte(k.KeyBytes)
 }
+
 
 // Hash returns a hash of the complete key
 func (k CompoundKey) Hash() uint64 {
@@ -81,24 +88,24 @@ type Store struct {
 	timestampIndex *TimestampIndex
 	
 	// Persistence
-	walFile      *os.File
-	walPath      string
-	snapshotPath string
-	walOffset    uint64
-	walEnabled   bool 
+	walFile         *os.File
+	walPath         string
+	snapshotPath    string
+	walOffset       uint64
+	walEnabled      bool 
 	snapShotEnabled bool
 	
 	// TTL management
-	ttlHeap      *TTLHeap
+	ttlHeap       *TTLHeap
 	cleanupTicker *time.Ticker
-	stopCleanup  chan bool
+	stopCleanup   chan bool
 }
 
 type entry struct {
-	key       CompoundKey
-	value     any
+	key        CompoundKey
+	value      any
 	insertTime time.Time
-	ttl       time.Duration // 0 means no expiration
+	ttl        time.Duration // 0 means no expiration
 }
 
 // TimestampIndex is a simple B-tree-like structure for range queries
@@ -774,38 +781,85 @@ func (s *Store) Get(key CompoundKey) (any, bool) {
 	return nil, false
 }
 
-// QueryIterator is used to return the current compound key
-type QueryIterator struct {
-    candidates map[uint64]bool
-    current    CompoundKey
+// QueryResult holds query results without copying all data
+type QueryResult struct {
+	keys   []CompoundKey
+	values []interface{}
+	count  int
+}
+
+// NewQueryResult creates a result with estimated capacity
+func NewQueryResult(estimatedSize int) *QueryResult {
+	return &QueryResult{
+		keys:   make([]CompoundKey, 0, estimatedSize),
+		values: make([]any, 0, estimatedSize),
+	}
+}
+
+// Len returns the number of results
+func (qr *QueryResult) Len() int {
+	return qr.count
+}
+
+// Get returns the key-value pair at index i
+func (qr *QueryResult) Get(i int) (CompoundKey, interface{}) {
+	if i < 0 || i >= qr.count {
+		return CompoundKey{}, nil
+	}
+	return qr.keys[i], qr.values[i]
+}
+
+// Iterate calls fn for each result
+func (qr *QueryResult) Iterate(fn func(CompoundKey, interface{}) bool) {
+	for i := 0; i < qr.count; i++ {
+		if !fn(qr.keys[i], qr.values[i]) {
+			break
+		}
+	}
+}
+
+// ToMap converts results to a map (only use if needed for compatibility)
+func (qr *QueryResult) ToMap() map[CompoundKey]interface{} {
+	results := make(map[CompoundKey]interface{}, qr.count)
+	for i := 0; i < qr.count; i++ {
+		results[qr.keys[i]] = qr.values[i]
+	}
+	return results
 }
 
 // Query finds all entries matching a partial key pattern
-func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+// Returns QueryResult which is much more memory efficient than map
+func (s *Store) Query(partial PartialKey) *QueryResult {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
 	// Find candidate set using most selective index
 	var candidates map[uint64]bool
+	var estimatedSize int
 	
 	// Choose the most selective index available
 	if partial.TenantID != nil {
 		candidates = s.tenantIndex[*partial.TenantID]
+		estimatedSize = len(candidates)
 	} else if partial.UserID != nil {
 		candidates = s.userIndex[*partial.UserID]
+		estimatedSize = len(candidates)
 	} else if partial.Resource != nil {
 		candidates = s.resourceIndex[*partial.Resource]
+		estimatedSize = len(candidates)
 	} else {
 		// No index available, scan all keys
 		candidates = make(map[uint64]bool)
 		for hash := range s.data {
 			candidates[hash] = true
 		}
+		estimatedSize = len(s.data)
 	}
-
-
+	
+	// Pre-allocate with estimated size to avoid reallocations
+	result := NewQueryResult(estimatedSize)
+	
 	// Filter candidates by remaining criteria
-	results := make(map[CompoundKey]any)
 	for hash := range candidates {
 		if entry, ok := s.data[hash]; ok {
 			// Skip expired entries
@@ -814,12 +868,14 @@ func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
 			}
 			
 			if partial.Matches(entry.key) {
-				results[entry.key] = entry.value
+				result.keys = append(result.keys, entry.key)
+				result.values = append(result.values, entry.value)
+				result.count++
 			}
 		}
 	}
 	
-	return results
+	return result
 }
 
 // RangeQuery finds all entries with timestamps in the given range
@@ -1082,8 +1138,8 @@ func main() {
 	fmt.Println("Example 3: Waiting for TTL expiration...")
 	time.Sleep(6 * time.Second)
 	
-	results = store.Query(WithTenant(1))
-	fmt.Printf("After 6 seconds, tenant 1 has %d entries (should be 0)\n\n", len(results))
+	queryResults := store.Query(WithTenant(1))
+	fmt.Printf("After 6 seconds, tenant 1 has %d entries (should be 0)\n\n", len(queryResults.values))
 	
 	// Example 4: Persistence
 	fmt.Println("Example 4: Creating snapshot...")
