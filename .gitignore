@@ -1,5 +1,7 @@
 .vscode
 .idea
 .local
+*.prof
+*.test
 bin
 test_data_*

@@ -98,8 +98,7 @@ func BenchmarkGet(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		key := keys[i%10000]
 		store.Get(key)
 	}
@@ -414,8 +413,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		op := rand.Intn(100)
 		
 		switch {

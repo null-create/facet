@@ -88,4 +88,6 @@ clean:
 	@rm -rf bin/
 	@rm -rf data/
 	@rm -rf test_data_*
+	@rm -f *.prof
+	@rm -f *.test
 	@echo "✓ Cleaned"
