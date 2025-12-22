@@ -300,6 +300,7 @@ func NewStore(dataDir string) (*Store, error) {
 	return store, nil
 }
 
+// Optional configurations for the Store
 type StoreOpts struct {
 	WalEnabled        bool
 	WalPath           string
