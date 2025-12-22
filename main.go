@@ -65,8 +65,8 @@ func (p PartialKey) Matches(k CompoundKey) bool {
 
 // Store is a concurrent key-value store with partial key query support
 type Store struct {
-	dataMu    sync.RWMutex  // For data map
-	indexMu   sync.RWMutex  // For indexes
+	mu    sync.RWMutex  // For data map
+	// indexMu   sync.RWMutex  // For indexes
 	data map[uint64]*entry  // main data store (keyed by full key hash)
 	
 	// Secondary indexes for efficient partial queries
@@ -630,8 +630,8 @@ func (s *Store) startTTLCleanup() {
 }
 
 func (s *Store) cleanupExpired() {
-	s.dataMu.Lock()
-	defer s.dataMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	
 	now := time.Now()
 	
@@ -654,8 +654,8 @@ func (s *Store) cleanupExpired() {
 
 // Set stores a value with the given compound key and optional TTL
 func (s *Store) Set(key CompoundKey, value interface{}, ttl time.Duration) {
-	s.dataMu.Lock()
-	defer s.dataMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	
 	hash := key.Hash()
 	
@@ -760,8 +760,8 @@ func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time
 }
 // Get retrieves a value by exact compound key
 func (s *Store) Get(key CompoundKey) (any, bool) {
-	s.indexMu.RLock()
-	defer s.indexMu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	
 	hash := key.Hash()
 	if entry, ok := s.data[hash]; ok {
@@ -782,11 +782,13 @@ type QueryIterator struct {
 
 // Query finds all entries matching a partial key pattern
 func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Find candidate set using most selective index
 	var candidates map[uint64]bool
 	
 	// Choose the most selective index available
-	s.indexMu.Lock()
 	if partial.TenantID != nil {
 		candidates = s.tenantIndex[*partial.TenantID]
 	} else if partial.UserID != nil {
@@ -800,12 +802,9 @@ func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
 			candidates[hash] = true
 		}
 	}
-	s.indexMu.Unlock()
+
 
 	// Filter candidates by remaining criteria
-	s.dataMu.Lock()
-	defer s.dataMu.Unlock()
-
 	results := make(map[CompoundKey]any)
 	for hash := range candidates {
 		if entry, ok := s.data[hash]; ok {
@@ -825,8 +824,8 @@ func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
 
 // RangeQuery finds all entries with timestamps in the given range
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey) map[CompoundKey]interface{} {
-	s.dataMu.Lock()
-	defer s.dataMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	
 	// Get candidates from timestamp index
 	candidateHashes := s.timestampIndex.RangeQuery(startTime, endTime)
@@ -872,10 +871,11 @@ func (s *Store) deleteInternal(hash uint64) {
 
 // Delete removes entries matching a partial key pattern
 func (s *Store) Delete(partial PartialKey) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Find all matching keys
 	var candidates map[uint64]bool
-	
-	s.indexMu.Lock()
 	if partial.TenantID != nil {
 		candidates = s.tenantIndex[*partial.TenantID]
 	} else if partial.UserID != nil {
@@ -888,12 +888,8 @@ func (s *Store) Delete(partial PartialKey) int {
 			candidates[hash] = true
 		}
 	}
-	s.indexMu.Unlock()
 	
 	// Collect hashes to delete
-	s.dataMu.Lock()
-	defer s.dataMu.Unlock()
-
 	var toDelete []uint64
 	for hash := range candidates {
 		if entry, ok := s.data[hash]; ok {
@@ -914,16 +910,15 @@ func (s *Store) Delete(partial PartialKey) int {
 
 // CreateSnapshot creates a snapshot of the current store state
 func (s *Store) CreateSnapshot() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if !s.snapShotEnabled {
 		return nil
 	}
-	
-	s.dataMu.RLock()
-	defer s.dataMu.RUnlock()
 
-	var buf bytes.Buffer
-	
 	// Write number of entries
+	var buf bytes.Buffer
 	entryCount := uint32(len(s.data))
 	if err := binary.Write(&buf, binary.BigEndian, entryCount); err != nil {
 		return fmt.Errorf("failed to write entry count: %w", err)
@@ -1011,8 +1006,8 @@ func (s *Store) Close() error {
 
 // Stats returns statistics about the store
 func (s *Store) Stats() map[string]int {
-	s. indexMu.RLock()
-	defer s.indexMu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	
 	return map[string]int{
 		"entries":   len(s.data),
