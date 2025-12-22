@@ -20,19 +20,19 @@ type CompoundKey struct {
 	Resource    string
 	Timestamp   int64
 	KeyBytes    string  // Cached serialization
-	bytesValid  bool
+	serialized  bool
 }
 
 // ToBytes serializes the key for hashing
 func (k CompoundKey) ToBytes() []byte {
-	if !k.bytesValid {
+	if !k.serialized {
 		buf := make([]byte, 16+len(k.Resource)+8)
 		binary.BigEndian.PutUint64(buf[0:8], k.TenantID)
 		binary.BigEndian.PutUint64(buf[8:16], k.UserID)
 		copy(buf[16:], []byte(k.Resource))
 		binary.BigEndian.PutUint64(buf[16+len(k.Resource):], uint64(k.Timestamp))
 		k.KeyBytes = string(buf)
-		k.bytesValid = true
+		k.serialized = true
 	}
 	return []byte(k.KeyBytes)
 }
@@ -767,8 +767,8 @@ func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time
 }
 // Get retrieves a value by exact compound key
 func (s *Store) Get(key CompoundKey) (any, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	
 	hash := key.Hash()
 	if entry, ok := s.data[hash]; ok {
@@ -830,8 +830,8 @@ func (qr *QueryResult) ToMap() map[CompoundKey]interface{} {
 // Query finds all entries matching a partial key pattern
 // Returns QueryResult which is much more memory efficient than map
 func (s *Store) Query(partial PartialKey) *QueryResult {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	
 	// Find candidate set using most selective index
 	var candidates map[uint64]bool
