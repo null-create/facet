@@ -305,8 +305,7 @@ func BenchmarkKeyHash(b *testing.B) {
 		Timestamp: time.Now().Unix(),
 	}
 	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		key.Hash()
 	}
 }
@@ -320,8 +319,7 @@ func BenchmarkKeyToBytes(b *testing.B) {
 		Timestamp: time.Now().Unix(),
 	}
 	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		key.ToBytes()
 	}
 }
@@ -330,8 +328,8 @@ func BenchmarkKeyToBytes(b *testing.B) {
 func BenchmarkStringKeySet(b *testing.B) {
 	store := make(map[string]interface{})
 	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		key := fmt.Sprintf("tenant:%d:user:%d:resource:%s:ts:%d",
 			i%100, i, fmt.Sprintf("resource_%d", i%10), time.Now().Unix())
 		store[key] = fmt.Sprintf("value_%d", i)
@@ -368,7 +366,7 @@ func BenchmarkTTLCleanup(b *testing.B) {
 	defer cleanupTestStore(store, b)
 	
 	// Prepopulate with entries that expire quickly
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		key := CompoundKey{
 			TenantID:  uint64(i % 100),
 			UserID:    uint64(i),
