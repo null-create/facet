@@ -1076,6 +1076,7 @@ func (s *Store) Stats() map[string]int {
 }
 
 // Helper functions for creating partial keys
+
 func WithTenant(id uint64) PartialKey {
 	return PartialKey{TenantID: &id}
 }
