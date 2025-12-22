@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"testing"
@@ -24,7 +25,10 @@ func createTestStore(t *testing.B) *Store {
 func cleanupTestStore(store *Store, t *testing.B) {
 	tmpDir := store.snapshotPath[:len(store.snapshotPath)-len("/snapshot.pb")]
 	store.Close()
-	os.RemoveAll(tmpDir)
+	err := os.RemoveAll(tmpDir)
+	if err != nil {
+		log.Printf("failed to remove test data dir: %v", err)
+	}
 }
 
 // BenchmarkSet measures write performance without TTL

@@ -805,7 +805,7 @@ func (qr *QueryResult) Len() int {
 }
 
 // Get returns the key-value pair at index i
-func (qr *QueryResult) Get(i int) (CompoundKey, interface{}) {
+func (qr *QueryResult) Get(i int) (CompoundKey, any) {
 	if i < 0 || i >= qr.count {
 		return CompoundKey{}, nil
 	}
@@ -813,7 +813,7 @@ func (qr *QueryResult) Get(i int) (CompoundKey, interface{}) {
 }
 
 // Iterate calls fn for each result
-func (qr *QueryResult) Iterate(fn func(CompoundKey, interface{}) bool) {
+func (qr *QueryResult) Iterate(fn func(CompoundKey, any) bool) {
 	for i := 0; i < qr.count; i++ {
 		if !fn(qr.keys[i], qr.values[i]) {
 			break
@@ -822,8 +822,8 @@ func (qr *QueryResult) Iterate(fn func(CompoundKey, interface{}) bool) {
 }
 
 // ToMap converts results to a map (only use if needed for compatibility)
-func (qr *QueryResult) ToMap() map[CompoundKey]interface{} {
-	results := make(map[CompoundKey]interface{}, qr.count)
+func (qr *QueryResult) ToMap() map[CompoundKey]any {
+	results := make(map[CompoundKey]any, qr.count)
 	for i := 0; i < qr.count; i++ {
 		results[qr.keys[i]] = qr.values[i]
 	}
