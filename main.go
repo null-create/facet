@@ -72,8 +72,7 @@ func (p PartialKey) Matches(k CompoundKey) bool {
 
 // Store is a concurrent key-value store with partial key query support
 type Store struct {
-	mu    sync.RWMutex  // For data map
-	// indexMu   sync.RWMutex  // For indexes
+	mu   sync.RWMutex  
 	data map[uint64]*entry  // main data store (keyed by full key hash)
 	
 	// Secondary indexes for efficient partial queries
@@ -660,7 +659,7 @@ func (s *Store) cleanupExpired() {
 }
 
 // Set stores a value with the given compound key and optional TTL
-func (s *Store) Set(key CompoundKey, value interface{}, ttl time.Duration) {
+func (s *Store) Set(key CompoundKey, value any, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	
