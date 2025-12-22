@@ -1080,16 +1080,24 @@ func WithTenant(id uint64) PartialKey {
 	return PartialKey{TenantID: &id}
 }
 
+func WithTenantAndUser(tenantID, userID uint64) PartialKey {
+	return PartialKey{TenantID: &tenantID, UserID: &userID}
+}
+
+func WithTenantAndResource(tenantID uint64, resource string) PartialKey {
+	return PartialKey{TenantID: &tenantID, Resource: &resource}
+}
+
 func WithUser(id uint64) PartialKey {
 	return PartialKey{UserID: &id}
 }
 
-func WithResource(name string) PartialKey {
-	return PartialKey{Resource: &name}
+func WithUserAndResource(userID uint64, resource string) PartialKey {
+	return PartialKey{UserID: &userID, Resource: &resource}
 }
 
-func WithTenantAndUser(tenantID, userID uint64) PartialKey {
-	return PartialKey{TenantID: &tenantID, UserID: &userID}
+func WithResource(name string) PartialKey {
+	return PartialKey{Resource: &name}
 }
 
 // Example usage
