@@ -15,34 +15,33 @@ import (
 
 // CompoundKey represents a multi-dimensional cache key
 type CompoundKey struct {
-	TenantID   uint64
-	UserID     uint64
-	Resource   string
-	Timestamp  int64
-	KeyBytes   string // Cached serialization
-	serialized bool
+	TenantID  uint64
+	UserID    uint64
+	Resource  string
+	Timestamp int64
+	hash      uint64 // Cached serialization
+	hashValid bool
 }
 
 // ToBytes serializes the key for hashing
 func (k *CompoundKey) ToBytes() []byte {
-	if !k.serialized {
-		buf := make([]byte, 16+len(k.Resource)+8)
-		binary.BigEndian.PutUint64(buf[0:8], k.TenantID)
-		binary.BigEndian.PutUint64(buf[8:16], k.UserID)
-		copy(buf[16:], []byte(k.Resource))
-		binary.BigEndian.PutUint64(buf[16+len(k.Resource):], uint64(k.Timestamp))
-		k.KeyBytes = string(buf)
-		k.serialized = true
-		return buf
-	}
-	return []byte(k.KeyBytes)
+	buf := make([]byte, 16+len(k.Resource)+8)
+	binary.BigEndian.PutUint64(buf[0:8], k.TenantID)
+	binary.BigEndian.PutUint64(buf[8:16], k.UserID)
+	copy(buf[16:], []byte(k.Resource))
+	binary.BigEndian.PutUint64(buf[16+len(k.Resource):], uint64(k.Timestamp))
+	return buf
 }
 
 // Hash returns a hash of the complete key
 func (k *CompoundKey) Hash() uint64 {
-	h := fnv.New64a()
-	h.Write(k.ToBytes())
-	return h.Sum64()
+	if !k.hashValid {
+		h := fnv.New64a()
+		h.Write(k.ToBytes())
+		k.hashValid = true
+		k.hash = h.Sum64()
+	}
+	return k.hash
 }
 
 // PartialKey represents a query pattern where some fields may be wildcards
