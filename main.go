@@ -785,7 +785,7 @@ func (s *Store) Get(key CompoundKey) (any, bool) {
 // QueryResult holds query results without copying all data
 type QueryResult struct {
 	keys   []CompoundKey
-	values []interface{}
+	values []any
 	count  int
 }
 
@@ -831,8 +831,8 @@ func (qr *QueryResult) ToMap() map[CompoundKey]interface{} {
 // Query finds all entries matching a partial key pattern
 // Returns QueryResult which is much more memory efficient than map
 func (s *Store) Query(partial PartialKey) *QueryResult {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	
 	// Find candidate set using most selective index
 	var candidates map[uint64]bool
@@ -881,8 +881,8 @@ func (s *Store) Query(partial PartialKey) *QueryResult {
 
 // RangeQuery finds all entries with timestamps in the given range
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey) map[CompoundKey]interface{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	
 	// Get candidates from timestamp index
 	candidateHashes := s.timestampIndex.RangeQuery(startTime, endTime)
