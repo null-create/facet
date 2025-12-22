@@ -131,7 +131,7 @@ func BenchmarkGetParallel(b *testing.B) {
 	})
 }
 
-func BenchmarkQueryStreamFull(b *testing.B) {
+func BenchmarkQueryFull(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
 	tenant := uint64(1)
@@ -152,13 +152,13 @@ func BenchmarkQueryStreamFull(b *testing.B) {
 	partial := PartialKey{TenantID: &tenant}
 
 	for b.Loop() {
-		store.QueryStream(partial, func(_ CompoundKey, _ any) bool {
+		store.Query(partial, func(_ CompoundKey, _ any) bool {
 			return true
 		})
 	}
 }
 
-func BenchmarkQueryStreamLimit(b *testing.B) {
+func BenchmarkQueryLimit(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
 
@@ -179,7 +179,7 @@ func BenchmarkQueryStreamLimit(b *testing.B) {
 
 	for b.Loop() {
 		count := 0
-		store.QueryStream(partial, func(_ CompoundKey, _ any) bool {
+		store.Query(partial, func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
@@ -206,7 +206,7 @@ func BenchmarkQueryByTenant(b *testing.B) {
 	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each tenant has ~1000 entries (1% of total)
-		store.QueryStream(WithTenant(uint64(i%100)), func(_ CompoundKey, _ any) bool {
+		store.Query(WithTenant(uint64(i%100)), func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
@@ -233,7 +233,7 @@ func BenchmarkQueryByUser(b *testing.B) {
 	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each user has ~10 entries (0.01% of total)
-		store.QueryStream(WithUser(uint64(i%10000)), func(_ CompoundKey, _ any) bool {
+		store.Query(WithUser(uint64(i%10000)), func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
@@ -260,7 +260,7 @@ func BenchmarkQueryByResource(b *testing.B) {
 	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each resource has ~10000 entries (10% of total)
-		store.QueryStream(WithResource(fmt.Sprintf("resource_%d", i%10)), func(_ CompoundKey, _ any) bool {
+		store.Query(WithResource(fmt.Sprintf("resource_%d", i%10)), func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
@@ -287,7 +287,7 @@ func BenchmarkQueryTenantAndUser(b *testing.B) {
 	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Very selective - typically 1-10 entries
-		store.QueryStream(WithTenantAndUser(uint64(i%100), uint64(i%10000)), func(_ CompoundKey, _ any) bool {
+		store.Query(WithTenantAndUser(uint64(i%100), uint64(i%10000)), func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
@@ -494,7 +494,9 @@ func BenchmarkMixedWorkload(b *testing.B) {
 			store.Get(key)
 
 		case op < 90: // 20% queries
-			store.Query(WithTenant(uint64(rand.Intn(100))))
+			store.Query(WithTenant(uint64(rand.Intn(100))), func(ck CompoundKey, a any) bool {
+				return true
+			})
 
 		case op < 98: // 8% writes
 			key := CompoundKey{
@@ -531,9 +533,13 @@ func benchmarkScale(b *testing.B, size int) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	var count int
 	for i := 0; b.Loop(); i++ {
 		// Query returns ~1% of dataset
-		store.Query(WithTenant(uint64(i % 100)))
+		store.Query(WithTenant(uint64(i%100)), func(ck CompoundKey, a any) bool {
+			count++
+			return count < size
+		})
 	}
 }
 
@@ -558,7 +564,9 @@ func BenchmarkQueryNoIndex(b *testing.B) {
 	for b.Loop() {
 		// Query by timestamp only (not indexed in partial key) - requires filtering
 		partial := PartialKey{Timestamp: &timestamp}
-		store.Query(partial)
+		store.Query(partial, func(ck CompoundKey, a any) bool {
+			return true
+		})
 	}
 }
 
@@ -584,7 +592,9 @@ func BenchmarkConcurrentReadWrite(b *testing.B) {
 		for pb.Next() {
 			if i%2 == 0 {
 				// Read
-				store.Query(WithTenant(uint64(i % 100)))
+				store.Query(WithTenant(uint64(i%100)), func(ck CompoundKey, a any) bool {
+					return true
+				})
 			} else {
 				// Write
 				key := CompoundKey{
@@ -655,7 +665,13 @@ func TestPartialQuery(t *testing.T) {
 	}
 
 	// Query by tenant
-	results := store.Query(WithTenant(1))
+	var results QueryResult
+	store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+		results.keys = append(results.keys, ck)
+		results.values = append(results.values, a)
+		results.count++
+		return results.count < 10
+	})
 	if len(results.keys) != 10 {
 		t.Fatalf("Expected 10 results, got %d", len(results.keys))
 	}
@@ -806,7 +822,13 @@ func TestReplayWAL(t *testing.T) {
 	}()
 
 	// Verify data was replayed from WAL
-	results := store2.Query(WithTenant(1))
+	var results QueryResult
+	store2.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+		results.count++
+		results.keys = append(results.keys, ck)
+		results.values = append(results.values, a)
+		return results.count < 3
+	})
 	if len(results.keys) != 3 {
 		t.Fatalf("Expected 3 entries after replaying WAL, got %d", len(results.keys))
 	}
@@ -918,7 +940,13 @@ func TestDelete(t *testing.T) {
 	}
 
 	// Verify deletion
-	results := store.Query(WithTenant(1))
+	var results QueryResult
+	store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+		results.keys = append(results.keys, ck)
+		results.values = append(results.values, a)
+		results.count++
+		return results.count == 5
+	})
 	if len(results.keys) != 0 {
 		t.Fatalf("Expected 0 results after deletion, got %d", len(results.keys))
 	}
@@ -955,7 +983,9 @@ func TestConcurrency(t *testing.T) {
 	// Reader goroutine
 	go func() {
 		for range 1000 {
-			store.Query(WithTenant(1))
+			store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+				return true
+			})
 		}
 		done <- true
 	}()
@@ -965,7 +995,13 @@ func TestConcurrency(t *testing.T) {
 	<-done
 
 	// Verify final state
-	results := store.Query(WithTenant(1))
+	var results QueryResult
+	store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+		results.keys = append(results.keys, ck)
+		results.values = append(results.values, a)
+		results.count++
+		return results.count == 1000
+	})
 	if len(results.keys) == 0 {
 		t.Fatal("Expected entries after concurrent operations")
 	}

@@ -845,59 +845,9 @@ func (qr *QueryResult) ToMap() map[CompoundKey]any {
 	return results
 }
 
-// Query finds all entries matching a partial key pattern
-// Returns QueryResult which is much more memory efficient than map
-func (s *Store) Query(partial PartialKey) *QueryResult {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// Find candidate set using most selective index
-	var candidates map[uint64]bool
-	var estimatedSize int
-
-	// Choose the most selective index available
-	if partial.TenantID != nil {
-		candidates = s.tenantIndex[*partial.TenantID]
-		estimatedSize = len(candidates)
-	} else if partial.UserID != nil {
-		candidates = s.userIndex[*partial.UserID]
-		estimatedSize = len(candidates)
-	} else if partial.Resource != nil {
-		candidates = s.resourceIndex[*partial.Resource]
-		estimatedSize = len(candidates)
-	} else {
-		// No index available, scan all keys
-		candidates = make(map[uint64]bool)
-		for hash := range s.data {
-			candidates[hash] = true
-		}
-		estimatedSize = len(s.data)
-	}
-
-	// Pre-allocate with estimated size to avoid reallocations
-	result := NewQueryResult(estimatedSize)
-
-	// Filter candidates by remaining criteria
-	for hash := range candidates {
-		if entry, ok := s.data[hash]; ok {
-			// Skip expired entries
-			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
-				continue
-			}
-
-			if partial.Matches(entry.key) {
-				result.keys = append(result.keys, entry.key)
-				result.values = append(result.values, entry.value)
-				result.count++
-			}
-		}
-	}
-
-	return result
-}
-
-// QueryStream calls fn for each match, returns false to stop early
-func (s *Store) QueryStream(partial PartialKey, fn func(CompoundKey, any) bool) {
+// Query finds all entries matching a partial key pattern and
+// calls fn for each match, returns false to stop early
+func (s *Store) Query(partial PartialKey, fn func(CompoundKey, any) bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -909,6 +859,7 @@ func (s *Store) QueryStream(partial PartialKey, fn func(CompoundKey, any) bool) 
 	} else if partial.Resource != nil {
 		candidates = s.resourceIndex[*partial.Resource]
 	} else {
+		// fallback: check everything if no item is found in any of the indices
 		candidates = make(map[uint64]bool, len(s.data))
 		for h := range s.data {
 			candidates[h] = true
@@ -1189,8 +1140,17 @@ func main() {
 	fmt.Println("Example 3: Waiting for TTL expiration...")
 	time.Sleep(6 * time.Second)
 
-	queryResults := store.Query(WithTenant(1))
-	fmt.Printf("After 6 seconds, tenant 1 has %d entries (should be 0)\n\n", len(queryResults.values))
+	// Query with results limit
+	const limit = 100
+	keys := make([]CompoundKey, 0, limit)
+	values := make([]any, 0, limit)
+	store.Query(WithTenant(1), func(k CompoundKey, v any) bool {
+		keys = append(keys, k)
+		values = append(values, v)
+		return len(keys) < limit
+	})
+
+	fmt.Printf("After 6 seconds, tenant 1 has %d entries (should be 0)\n\n", len(values))
 
 	// Example 4: Persistence
 	fmt.Println("Example 4: Creating snapshot...")
