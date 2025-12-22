@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"testing"
@@ -23,19 +22,14 @@ func createTestStore(t *testing.B) *Store {
 }
 
 func cleanupTestStore(store *Store, t *testing.B) {
-	tmpDir := store.snapshotPath[:len(store.snapshotPath)-len("/snapshot.pb")]
 	store.Close()
-	err := os.RemoveAll(tmpDir)
-	if err != nil {
-		log.Printf("failed to remove test data dir: %v", err)
-	}
 }
 
 // BenchmarkSet measures write performance without TTL
 func BenchmarkSet(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	for i := 0; b.Loop(); i++ {
 		key := CompoundKey{
 			TenantID:  uint64(i % 100),
@@ -51,7 +45,7 @@ func BenchmarkSet(b *testing.B) {
 func BenchmarkSetWithTTL(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	for i := 0; b.Loop(); i++ {
 		key := CompoundKey{
 			TenantID:  uint64(i % 100),
@@ -67,7 +61,7 @@ func BenchmarkSetWithTTL(b *testing.B) {
 func BenchmarkSetParallel(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
@@ -88,7 +82,7 @@ func BenchmarkSetParallel(b *testing.B) {
 func BenchmarkGet(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	keys := make([]CompoundKey, 10000)
 	for i := range 10000 {
@@ -101,7 +95,7 @@ func BenchmarkGet(b *testing.B) {
 		keys[i] = key
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	for i := 0; b.Loop(); i++ {
 		key := keys[i%10000]
 		store.Get(key)
@@ -112,7 +106,7 @@ func BenchmarkGet(b *testing.B) {
 func BenchmarkGetParallel(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	keys := make([]CompoundKey, 10000)
 	for i := range 10000 {
@@ -125,7 +119,7 @@ func BenchmarkGetParallel(b *testing.B) {
 		keys[i] = key
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
@@ -137,11 +131,66 @@ func BenchmarkGetParallel(b *testing.B) {
 	})
 }
 
+func BenchmarkQueryStreamFull(b *testing.B) {
+	store := createTestStore(b)
+	defer cleanupTestStore(store, b)
+	tenant := uint64(1)
+
+	// Seed data
+	keys := make([]CompoundKey, 10000)
+	for i := range 10000 {
+		key := CompoundKey{
+			TenantID:  uint64(i % 100),
+			UserID:    uint64(i),
+			Resource:  fmt.Sprintf("resource_%d", i%10),
+			Timestamp: int64(i),
+		}
+		keys[i] = key
+		store.Set(key, fmt.Sprintf("value_%d", i), 0)
+	}
+
+	partial := PartialKey{TenantID: &tenant}
+
+	for b.Loop() {
+		store.QueryStream(partial, func(_ CompoundKey, _ any) bool {
+			return true
+		})
+	}
+}
+
+func BenchmarkQueryStreamLimit(b *testing.B) {
+	store := createTestStore(b)
+	defer cleanupTestStore(store, b)
+
+	tenant := uint64(1)
+
+	for i := range 10000 {
+		store.Set(CompoundKey{
+			TenantID:  tenant,
+			UserID:    uint64(i),
+			Resource:  "res",
+			Timestamp: int64(i),
+		}, i, 0)
+	}
+
+	partial := PartialKey{TenantID: &tenant}
+
+	const limit = 100
+
+	for b.Loop() {
+		count := 0
+		store.QueryStream(partial, func(_ CompoundKey, _ any) bool {
+			count++
+			return count < limit
+		})
+	}
+}
+
 // BenchmarkQueryByTenant measures partial query performance (indexed field)
 func BenchmarkQueryByTenant(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate with 100k entries across 100 tenants
 	for i := range 100000 {
 		key := CompoundKey{
@@ -152,10 +201,15 @@ func BenchmarkQueryByTenant(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
+	var count int
+	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each tenant has ~1000 entries (1% of total)
-		store.Query(WithTenant(uint64(i % 100)))
+		store.QueryStream(WithTenant(uint64(i%100)), func(_ CompoundKey, _ any) bool {
+			count++
+			return count < limit
+		})
 	}
 }
 
@@ -163,7 +217,7 @@ func BenchmarkQueryByTenant(b *testing.B) {
 func BenchmarkQueryByUser(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	for i := range 100000 {
 		key := CompoundKey{
@@ -174,10 +228,15 @@ func BenchmarkQueryByUser(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
+	var count int
+	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each user has ~10 entries (0.01% of total)
-		store.Query(WithUser(uint64(i % 10000)))
+		store.QueryStream(WithUser(uint64(i%10000)), func(_ CompoundKey, _ any) bool {
+			count++
+			return count < limit
+		})
 	}
 }
 
@@ -185,7 +244,7 @@ func BenchmarkQueryByUser(b *testing.B) {
 func BenchmarkQueryByResource(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	for i := range 100000 {
 		key := CompoundKey{
@@ -196,10 +255,15 @@ func BenchmarkQueryByResource(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
+	var count int
+	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each resource has ~10000 entries (10% of total)
-		store.Query(WithResource(fmt.Sprintf("resource_%d", i%10)))
+		store.QueryStream(WithResource(fmt.Sprintf("resource_%d", i%10)), func(_ CompoundKey, _ any) bool {
+			count++
+			return count < limit
+		})
 	}
 }
 
@@ -207,7 +271,7 @@ func BenchmarkQueryByResource(b *testing.B) {
 func BenchmarkQueryTenantAndUser(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	for i := range 100000 {
 		key := CompoundKey{
@@ -218,11 +282,15 @@ func BenchmarkQueryTenantAndUser(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
-	
+
+	var count int
+	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Very selective - typically 1-10 entries
-		store.Query(WithTenantAndUser(uint64(i%100), uint64(i%10000)))
+		store.QueryStream(WithTenantAndUser(uint64(i%100), uint64(i%10000)), func(_ CompoundKey, _ any) bool {
+			count++
+			return count < limit
+		})
 	}
 }
 
@@ -230,7 +298,7 @@ func BenchmarkQueryTenantAndUser(b *testing.B) {
 func BenchmarkRangeQuery(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate with timestamps spread over time
 	baseTime := time.Now().Unix()
 	for i := range 100000 {
@@ -242,7 +310,7 @@ func BenchmarkRangeQuery(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	for i := 0; b.Loop(); i++ {
 		// Query 1000 entries (1% of data)
 		start := baseTime + int64(i%99000)
@@ -255,7 +323,7 @@ func BenchmarkRangeQuery(b *testing.B) {
 func BenchmarkRangeQueryWithFilter(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	baseTime := time.Now().Unix()
 	for i := range 100000 {
@@ -267,7 +335,7 @@ func BenchmarkRangeQueryWithFilter(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	for i := 0; b.Loop(); i++ {
 		// Query 1000 entries for specific tenant (~10 results)
 		start := baseTime + int64(i%99000)
@@ -280,7 +348,7 @@ func BenchmarkRangeQueryWithFilter(b *testing.B) {
 func BenchmarkDelete(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		// Repopulate for each iteration
@@ -294,7 +362,7 @@ func BenchmarkDelete(b *testing.B) {
 			store.Set(key, "value", 0)
 		}
 		b.StartTimer()
-		
+
 		// Delete by tenant (~100 entries)
 		store.Delete(WithTenant(uint64(i % 10)))
 	}
@@ -308,7 +376,7 @@ func BenchmarkKeyHash(b *testing.B) {
 		Resource:  "orders",
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	for b.Loop() {
 		key.Hash()
 	}
@@ -322,7 +390,7 @@ func BenchmarkKeyToBytes(b *testing.B) {
 		Resource:  "orders",
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	for b.Loop() {
 		key.ToBytes()
 	}
@@ -331,7 +399,7 @@ func BenchmarkKeyToBytes(b *testing.B) {
 // // Comparative benchmark: Simulate Redis-style string key operations
 // func BenchmarkStringKeySet(b *testing.B) {
 // 	store := make(map[string]any)
-	
+
 // 	for i := 0; b.Loop(); i++ {
 // 		key := fmt.Sprintf("tenant:%d:user:%d:resource:%s:ts:%d",
 // 			i%100, i, fmt.Sprintf("resource_%d", i%10), time.Now().Unix())
@@ -342,14 +410,14 @@ func BenchmarkKeyToBytes(b *testing.B) {
 // // Comparative benchmark: Simulate Redis SCAN for partial matches
 // func BenchmarkStringKeyScan(b *testing.B) {
 // 	store := make(map[string]any)
-	
+
 // 	// Prepopulate
 // 	for i := range 100000 {
 // 		key := fmt.Sprintf("tenant:%d:user:%d:resource:%s",
 // 			i%100, i, fmt.Sprintf("resource_%d", i%10))
 // 		store[key] = fmt.Sprintf("value_%d", i)
 // 	}
-	
+
 // 	for i := 0; b.Loop(); i++ {
 // 		// Simulate SCAN with pattern matching
 // 		pattern := fmt.Sprintf("tenant:%d:", i%100)
@@ -366,7 +434,7 @@ func BenchmarkKeyToBytes(b *testing.B) {
 func BenchmarkTTLCleanup(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate with entries that expire quickly
 	for i := range 10000 {
 		key := CompoundKey{
@@ -377,12 +445,12 @@ func BenchmarkTTLCleanup(b *testing.B) {
 		}
 		store.Set(key, "value", 100*time.Millisecond)
 	}
-	
+
 	for b.Loop() {
 		time.Sleep(150 * time.Millisecond)
 		// Force cleanup
 		store.cleanupExpired()
-		
+
 		// Repopulate
 		for j := range 1000 {
 			key := CompoundKey{
@@ -400,7 +468,7 @@ func BenchmarkTTLCleanup(b *testing.B) {
 func BenchmarkMixedWorkload(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	for i := range 10000 {
 		key := CompoundKey{
@@ -411,10 +479,10 @@ func BenchmarkMixedWorkload(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	for i := 0; b.Loop(); i++ {
 		op := rand.Intn(100)
-		
+
 		switch {
 		case op < 70: // 70% reads
 			key := CompoundKey{
@@ -424,10 +492,10 @@ func BenchmarkMixedWorkload(b *testing.B) {
 				Timestamp: int64(rand.Intn(10000)),
 			}
 			store.Get(key)
-			
+
 		case op < 90: // 20% queries
 			store.Query(WithTenant(uint64(rand.Intn(100))))
-			
+
 		case op < 98: // 8% writes
 			key := CompoundKey{
 				TenantID:  uint64(rand.Intn(100)),
@@ -436,7 +504,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 				Timestamp: time.Now().Unix(),
 			}
 			store.Set(key, fmt.Sprintf("value_%d", i), 0)
-			
+
 		default: // 2% deletes
 			store.Delete(WithTenant(uint64(rand.Intn(100))))
 		}
@@ -451,7 +519,7 @@ func BenchmarkScaleTest_100K(b *testing.B) { benchmarkScale(b, 100000) }
 func benchmarkScale(b *testing.B, size int) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	for i := range size {
 		key := CompoundKey{
@@ -462,7 +530,7 @@ func benchmarkScale(b *testing.B, size int) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	for i := 0; b.Loop(); i++ {
 		// Query returns ~1% of dataset
 		store.Query(WithTenant(uint64(i % 100)))
@@ -473,7 +541,7 @@ func benchmarkScale(b *testing.B, size int) {
 func BenchmarkQueryNoIndex(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	for i := range 10000 {
 		key := CompoundKey{
@@ -484,9 +552,9 @@ func BenchmarkQueryNoIndex(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	timestamp := int64(5000)
-	
+
 	for b.Loop() {
 		// Query by timestamp only (not indexed in partial key) - requires filtering
 		partial := PartialKey{Timestamp: &timestamp}
@@ -498,7 +566,7 @@ func BenchmarkQueryNoIndex(b *testing.B) {
 func BenchmarkConcurrentReadWrite(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	
+
 	// Prepopulate
 	for i := range 10000 {
 		key := CompoundKey{
@@ -509,7 +577,7 @@ func BenchmarkConcurrentReadWrite(b *testing.B) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
@@ -544,17 +612,17 @@ func TestBasicOperations(t *testing.T) {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	key := CompoundKey{
 		TenantID:  1,
 		UserID:    100,
 		Resource:  "profile",
 		Timestamp: 12345,
 	}
-	
+
 	// Test Set and Get
 	store.Set(key, "test_value", 0)
-	
+
 	val, ok := store.Get(key)
 	if !ok {
 		t.Fatal("Expected to find key")
@@ -574,7 +642,7 @@ func TestPartialQuery(t *testing.T) {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	// Add multiple entries
 	for i := range 10 {
 		key := CompoundKey{
@@ -585,7 +653,7 @@ func TestPartialQuery(t *testing.T) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	// Query by tenant
 	results := store.Query(WithTenant(1))
 	if len(results.keys) != 10 {
@@ -603,7 +671,7 @@ func TestRangeQuery(t *testing.T) {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	// Add entries with sequential timestamps
 	baseTime := int64(1000)
 	for i := range 20 {
@@ -615,13 +683,13 @@ func TestRangeQuery(t *testing.T) {
 		}
 		store.Set(key, fmt.Sprintf("event_%d", i), 0)
 	}
-	
+
 	// Query range [1050, 1150] should return 11 entries
 	results := store.RangeQuery(baseTime+50, baseTime+150, PartialKey{})
 	if len(results) != 11 {
 		t.Fatalf("Expected 11 results in range, got %d", len(results))
 	}
-	
+
 	// Query range with filter
 	results = store.RangeQuery(baseTime, baseTime+200, WithTenant(1))
 	if len(results) != 20 {
@@ -639,25 +707,25 @@ func TestTTL(t *testing.T) {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	key := CompoundKey{
 		TenantID:  1,
 		UserID:    100,
 		Resource:  "session",
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	// Set with 2 second TTL
 	store.Set(key, "session_data", 2*time.Second)
-	
+
 	// Should exist immediately
 	if _, ok := store.Get(key); !ok {
 		t.Fatal("Expected key to exist immediately after set")
 	}
-	
+
 	// Wait for expiration
 	time.Sleep(3 * time.Second)
-	
+
 	// Should be expired
 	if _, ok := store.Get(key); ok {
 		t.Fatal("Expected key to be expired after TTL")
@@ -674,7 +742,7 @@ func TestTTL(t *testing.T) {
 // 		store.Close()
 // 		os.RemoveAll(tmpDir)
 // 	}()
-	
+
 // 	// Add some entries
 // 	for i := range 5 {
 // 		key := CompoundKey{
@@ -685,12 +753,12 @@ func TestTTL(t *testing.T) {
 // 		}
 // 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 // 	}
-	
+
 // 	// Create snapshot
 // 	if err := store.CreateSnapshot(); err != nil {
 // 		t.Fatalf("Failed to create snapshot: %v", err)
 // 	}
-	
+
 // 	// Create new store and load snapshot
 // 	store.Close()
 // 	store2, err := NewStore(tmpDir)
@@ -698,7 +766,7 @@ func TestTTL(t *testing.T) {
 // 		t.Fatal(err)
 // 	}
 // 	defer store2.Close()
-	
+
 // 	// Verify data was loaded
 // 	results := store2.Query(WithTenant(1))
 // 	if len(results) != 5 {
@@ -712,7 +780,7 @@ func TestReplayWAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Add some entries (will be written to WAL)
 	for i := range 3 {
 		key := CompoundKey{
@@ -723,10 +791,10 @@ func TestReplayWAL(t *testing.T) {
 		}
 		store.Set(key, fmt.Sprintf("session_%d", i), 0)
 	}
-	
+
 	// Close store
 	store.Close()
-	
+
 	// Create new store (should replay WAL)
 	store2, err := NewStore(tmpDir)
 	if err != nil {
@@ -736,7 +804,7 @@ func TestReplayWAL(t *testing.T) {
 		store2.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	// Verify data was replayed from WAL
 	results := store2.Query(WithTenant(1))
 	if len(results.keys) != 3 {
@@ -754,7 +822,7 @@ func TestReplayWAL(t *testing.T) {
 // 		store.Close()
 // 		os.RemoveAll(tmpDir)
 // 	}()
-	
+
 // 	// Add entry with short TTL
 // 	key := CompoundKey{
 // 		TenantID:  1,
@@ -763,15 +831,15 @@ func TestReplayWAL(t *testing.T) {
 // 		Timestamp: time.Now().Unix(),
 // 	}
 // 	store.Set(key, "temporary_data", 1*time.Second)
-	
+
 // 	// Create snapshot
 // 	if err := store.CreateSnapshot(); err != nil {
 // 		t.Fatalf("Failed to create snapshot: %v", err)
 // 	}
-	
+
 // 	// Wait for expiration
 // 	time.Sleep(2 * time.Second)
-	
+
 // 	// Load snapshot in new store
 // 	store.Close()
 // 	store2, err := NewStore(tmpDir)
@@ -779,7 +847,7 @@ func TestReplayWAL(t *testing.T) {
 // 		t.Fatal(err)
 // 	}
 // 	defer store2.Close()
-	
+
 // 	// Expired entry should not be loaded
 // 	results := store2.Query(WithTenant(1))
 // 	if len(results) != 0 {
@@ -797,7 +865,7 @@ func TestReplayWAL(t *testing.T) {
 // 		store.Close()
 // 		os.RemoveAll(tmpDir)
 // 	}()
-	
+
 // 	// Load snapshot should succeed even if file doesn't exist
 // 	if err := store.loadSnapshot(); err != nil {
 // 		t.Fatalf("Loading non-existent snapshot should not error: %v", err)
@@ -814,7 +882,7 @@ func TestEmptyWAL(t *testing.T) {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	// Replay WAL should succeed even if file doesn't exist
 	if err := store.replayWAL(); err != nil {
 		t.Fatalf("Replaying non-existent WAL should not error: %v", err)
@@ -831,7 +899,7 @@ func TestDelete(t *testing.T) {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	// Add entries
 	for i := range 5 {
 		key := CompoundKey{
@@ -842,13 +910,13 @@ func TestDelete(t *testing.T) {
 		}
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
-	
+
 	// Delete by tenant
 	deleted := store.Delete(WithTenant(1))
 	if deleted != 5 {
 		t.Fatalf("Expected to delete 5 entries, deleted %d", deleted)
 	}
-	
+
 	// Verify deletion
 	results := store.Query(WithTenant(1))
 	if len(results.keys) != 0 {
@@ -866,10 +934,10 @@ func TestConcurrency(t *testing.T) {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}()
-	
+
 	// Run concurrent writes and reads
 	done := make(chan bool)
-	
+
 	// Writer goroutine
 	go func() {
 		for i := range 1000 {
@@ -883,7 +951,7 @@ func TestConcurrency(t *testing.T) {
 		}
 		done <- true
 	}()
-	
+
 	// Reader goroutine
 	go func() {
 		for range 1000 {
@@ -891,11 +959,11 @@ func TestConcurrency(t *testing.T) {
 		}
 		done <- true
 	}()
-	
+
 	// Wait for both to complete
 	<-done
 	<-done
-	
+
 	// Verify final state
 	results := store.Query(WithTenant(1))
 	if len(results.keys) == 0 {
@@ -905,19 +973,19 @@ func TestConcurrency(t *testing.T) {
 
 func TestTimestampIndex(t *testing.T) {
 	idx := NewTimestampIndex()
-	
+
 	// Add entries
 	idx.Add(100, 1)
 	idx.Add(200, 2)
 	idx.Add(150, 3)
 	idx.Add(100, 4) // Same timestamp
-	
+
 	// Range query
 	results := idx.RangeQuery(90, 160)
 	if len(results) != 3 { // Should get hashes 1, 4, 3
 		t.Fatalf("Expected 3 results, got %d", len(results))
 	}
-	
+
 	// Remove and query again
 	idx.Remove(100, 1)
 	results = idx.RangeQuery(90, 160)
@@ -928,25 +996,25 @@ func TestTimestampIndex(t *testing.T) {
 
 func TestTTLHeap(t *testing.T) {
 	heap := NewTTLHeap()
-	
+
 	now := time.Now()
-	
+
 	// Add items with different expiration times
 	heap.Push(1, now.Add(5*time.Second))
 	heap.Push(2, now.Add(2*time.Second))
 	heap.Push(3, now.Add(8*time.Second))
-	
+
 	// Peek should return earliest expiration
 	earliest, ok := heap.Peek()
 	if !ok {
 		t.Fatal("Expected heap to have items")
 	}
-	
+
 	expected := now.Add(2 * time.Second)
 	if earliest.Unix() != expected.Unix() {
 		t.Fatalf("Expected earliest expiration at %v, got %v", expected, earliest)
 	}
-	
+
 	// Pop should return in order
 	hash, expTime, ok := heap.Pop()
 	if !ok || hash != 2 {
