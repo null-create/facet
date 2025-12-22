@@ -39,7 +39,7 @@ func (k *CompoundKey) ToBytes() []byte {
 }
 
 // Hash returns a hash of the complete key
-func (k CompoundKey) Hash() uint64 {
+func (k *CompoundKey) Hash() uint64 {
 	h := fnv.New64a()
 	h.Write(k.ToBytes())
 	return h.Sum64()

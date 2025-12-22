@@ -535,7 +535,6 @@ func benchmarkScale(b *testing.B, size int) {
 
 	var count int
 	for i := 0; b.Loop(); i++ {
-		// Query returns ~1% of dataset
 		store.Query(WithTenant(uint64(i%100)), func(ck CompoundKey, a any) bool {
 			count++
 			return count < size
