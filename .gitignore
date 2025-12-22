@@ -1,7 +1,13 @@
+# IDE/misc
 .vscode
 .idea
 .local
+
+# testing artifacts
 *.prof
 *.test
+*.out
+
+# build artifacts
 bin
 test_data_*
