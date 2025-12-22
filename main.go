@@ -53,7 +53,7 @@ type PartialKey struct {
 	Timestamp *int64
 }
 
-// Matches checks if a CompoundKey matches this partial key pattern
+// Matches returns true if all non-nil fields in p equal k.
 func (p PartialKey) Matches(k CompoundKey) bool {
 	if p.TenantID != nil && *p.TenantID != k.TenantID {
 		return false
