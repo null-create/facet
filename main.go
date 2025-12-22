@@ -782,13 +782,11 @@ type QueryIterator struct {
 
 // Query finds all entries matching a partial key pattern
 func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
-	s.indexMu.Lock()
-	defer s.indexMu.Unlock()
-	
 	// Find candidate set using most selective index
 	var candidates map[uint64]bool
 	
 	// Choose the most selective index available
+	s.indexMu.Lock()
 	if partial.TenantID != nil {
 		candidates = s.tenantIndex[*partial.TenantID]
 	} else if partial.UserID != nil {
@@ -802,8 +800,12 @@ func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
 			candidates[hash] = true
 		}
 	}
-	
+	s.indexMu.Unlock()
+
 	// Filter candidates by remaining criteria
+	s.dataMu.Lock()
+	defer s.dataMu.Unlock()
+
 	results := make(map[CompoundKey]any)
 	for hash := range candidates {
 		if entry, ok := s.data[hash]; ok {
@@ -823,8 +825,8 @@ func (s *Store) Query(partial PartialKey) map[CompoundKey]any {
 
 // RangeQuery finds all entries with timestamps in the given range
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey) map[CompoundKey]interface{} {
-	s.indexMu.RLock()
-	defer s.indexMu.RUnlock()
+	s.dataMu.Lock()
+	defer s.dataMu.Unlock()
 	
 	// Get candidates from timestamp index
 	candidateHashes := s.timestampIndex.RangeQuery(startTime, endTime)
