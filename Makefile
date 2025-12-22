@@ -52,14 +52,14 @@ bench-cpu:
 	@echo "Running benchmarks with CPU profiling..."
 	@go test -bench=. -benchmem -benchtime=10s -cpuprofile=cpu.prof
 	@echo "✓ CPU profile saved to cpu.prof"
-	@echo "CPU:   go tool pprof cpu.prof"
+	@go tool pprof -top cpu.prof"
 
 ## bench-mem: Run benchmarks with memory profiling
 bench-mem:
 	@echo "Running benchmarks with memory profiling..."
 	@go test -bench=. -benchmem -benchtime=10s -memprofile=mem.prof
 	@echo "✓ Memory profile saved to mem.prof"
-	@echo "Mem:   go tool pprof mem.prof"
+	@go tool pprof -top mem.prof"
 
 ## bench-all: Run benchmarks with all profiling
 bench-all:
