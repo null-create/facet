@@ -302,7 +302,9 @@ func NewStore(dataDir string) (*Store, error) {
 
 type StoreOpts struct {
 	WalEnabled        bool
+	WalPath           string
 	SnapshotsEnabled  bool 
+	SnapshotPath      string
 }
 
 // Create a store with or without WAL or snapshots
@@ -322,9 +324,9 @@ func NewStoreWithOpts(dataDir string, opts StoreOpts) (*Store, error) {
 		timestampIndex:  NewTimestampIndex(),
 		ttlHeap:         NewTTLHeap(),
 		walEnabled:      opts.WalEnabled,
-		walPath:         filepath.Join(dataDir, "wal.log"),
+		walPath:         opts.WalPath,
 		snapShotEnabled: opts.SnapshotsEnabled,
-		snapshotPath:    filepath.Join(dataDir, "snapshot.pb"),
+		snapshotPath:    opts.SnapshotPath,
 		stopCleanup:     make(chan bool),
 	}
 	
