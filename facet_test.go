@@ -143,7 +143,6 @@ func BenchmarkGetParallel(b *testing.B) {
 func BenchmarkQueryFull(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
-	tenant := uint64(1)
 
 	// Seed data
 	for i := range 10000 {
@@ -156,11 +155,9 @@ func BenchmarkQueryFull(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
-	partial := PartialKey{TenantID: &tenant}
-
 	b.ResetTimer()
 	for b.Loop() {
-		store.Query(partial, func(_ CompoundKey, _ any) bool {
+		store.Query(WithTenant(1), func(_ CompoundKey, _ any) bool {
 			return true
 		})
 	}
@@ -183,12 +180,10 @@ func BenchmarkQueryLimit(b *testing.B) {
 	}
 
 	limit := 100
-	partial := PartialKey{TenantID: &tenant}
-
 	b.ResetTimer()
 	for b.Loop() {
 		count := 0
-		store.Query(partial, func(_ CompoundKey, _ any) bool {
+		store.Query(WithTenant(tenant), func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
