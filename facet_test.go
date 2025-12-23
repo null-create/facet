@@ -14,7 +14,7 @@ var tmpDir = fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
 
 // Helper to create a test store
 func createTestStore(t *testing.B) *Store {
-	store, err := NewStoreWithOpts(tmpDir, StoreOpts{
+	store, err := NewStoreWithOpts("", StoreOpts{
 		WalEnabled:       false,
 		SnapshotsEnabled: false,
 	})
