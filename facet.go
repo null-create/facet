@@ -881,7 +881,7 @@ func (s *Store) Query(partial PartialKey, fn func(CompoundKey, any) bool) {
 }
 
 // RangeQuery finds all entries with timestamps in the given range
-func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey) map[CompoundKey]interface{} {
+func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey) map[CompoundKey]any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
