@@ -34,6 +34,7 @@ func BenchmarkSet(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		key := CompoundKey{
 			TenantID:  uint64(i % 100),
@@ -50,6 +51,7 @@ func BenchmarkSetWithTTL(b *testing.B) {
 	store := createTestStore(b)
 	defer cleanupTestStore(store, b)
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		key := CompoundKey{
 			TenantID:  uint64(i % 100),
@@ -97,9 +99,11 @@ func BenchmarkGet(b *testing.B) {
 			Timestamp: int64(i),
 		}
 		keys[i] = key
+		keys[i].Hash() // Hash once!
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		key := keys[i%10000]
 		store.Get(key)
@@ -121,6 +125,7 @@ func BenchmarkGetParallel(b *testing.B) {
 			Timestamp: int64(i),
 		}
 		keys[i] = key
+		keys[i].Hash() // Hash once!
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
@@ -141,7 +146,6 @@ func BenchmarkQueryFull(b *testing.B) {
 	tenant := uint64(1)
 
 	// Seed data
-	keys := make([]CompoundKey, 10000)
 	for i := range 10000 {
 		key := CompoundKey{
 			TenantID:  uint64(i % 100),
@@ -149,12 +153,12 @@ func BenchmarkQueryFull(b *testing.B) {
 			Resource:  fmt.Sprintf("resource_%d", i%10),
 			Timestamp: int64(i),
 		}
-		keys[i] = key
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
 	partial := PartialKey{TenantID: &tenant}
 
+	b.ResetTimer()
 	for b.Loop() {
 		store.Query(partial, func(_ CompoundKey, _ any) bool {
 			return true
@@ -169,18 +173,19 @@ func BenchmarkQueryLimit(b *testing.B) {
 	tenant := uint64(1)
 
 	for i := range 10000 {
-		store.Set(CompoundKey{
+		key := CompoundKey{
 			TenantID:  tenant,
 			UserID:    uint64(i),
 			Resource:  "res",
 			Timestamp: int64(i),
-		}, i, 0)
+		}
+		store.Set(key, i, 0)
 	}
 
+	limit := 100
 	partial := PartialKey{TenantID: &tenant}
 
-	const limit = 100
-
+	b.ResetTimer()
 	for b.Loop() {
 		count := 0
 		store.Query(partial, func(_ CompoundKey, _ any) bool {
@@ -206,6 +211,7 @@ func BenchmarkQueryByTenant(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Each tenant has ~1000 entries (1% of total)
 		store.Query(WithTenant(uint64(i%100)), func(_ CompoundKey, _ any) bool {
@@ -230,6 +236,7 @@ func BenchmarkQueryByUser(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Each user has ~10 entries (0.01% of total)
 		store.Query(WithUser(uint64(i%10000)), func(_ CompoundKey, _ any) bool {
@@ -254,6 +261,7 @@ func BenchmarkQueryByResource(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Each resource has ~10000 entries (10% of total)
 		store.Query(WithResource(fmt.Sprintf("resource_%d", i%10)), func(_ CompoundKey, _ any) bool {
@@ -278,6 +286,7 @@ func BenchmarkQueryTenantAndUser(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Very selective - typically 1-10 entries
 		store.Query(WithTenantAndUser(uint64(i%100), uint64(i%10000)), func(_ CompoundKey, _ any) bool {
@@ -303,6 +312,7 @@ func BenchmarkRangeQuery(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Query 1000 entries (1% of data)
 		start := baseTime + int64(i%99000)
@@ -328,6 +338,7 @@ func BenchmarkRangeQueryWithFilter(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Query 1000 entries for specific tenant (~10 results)
 		start := baseTime + int64(i%99000)
@@ -344,7 +355,7 @@ func BenchmarkDelete(b *testing.B) {
 	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		// Repopulate for each iteration
-		for j := 0; j < 1000; j++ {
+		for j := range 1000 {
 			key := CompoundKey{
 				TenantID:  uint64(i % 10),
 				UserID:    uint64(j),
@@ -369,6 +380,7 @@ func BenchmarkKeyHash(b *testing.B) {
 		Timestamp: time.Now().Unix(),
 	}
 
+	b.ResetTimer()
 	for b.Loop() {
 		key.Hash()
 	}
@@ -383,6 +395,7 @@ func BenchmarkKeyToBytes(b *testing.B) {
 		Timestamp: time.Now().Unix(),
 	}
 
+	b.ResetTimer()
 	for b.Loop() {
 		key.ToBytes()
 	}
