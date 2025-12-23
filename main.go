@@ -38,8 +38,8 @@ func (k *CompoundKey) Hash() uint64 {
 	if !k.hashValid {
 		h := fnv.New64a()
 		h.Write(k.ToBytes())
-		k.hashValid = true
 		k.hash = h.Sum64()
+		k.hashValid = true
 	}
 	return k.hash
 }
@@ -88,10 +88,10 @@ type Store struct {
 	// Persistence
 	walFile         *os.File
 	walPath         string
-	snapshotPath    string
 	walOffset       uint64
 	walEnabled      bool
 	snapShotEnabled bool
+	snapshotPath    string
 
 	// TTL management
 	ttlHeap       *TTLHeap
