@@ -1071,8 +1071,8 @@ func (s *Store) Close() error {
 
 // Stats returns statistics about the store
 func (s *Store) Stats() map[string]int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return map[string]int{
 		"entries":   len(s.data),
