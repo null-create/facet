@@ -1046,7 +1046,8 @@ func (s *Store) CreateSnapshot() error {
 	return nil
 }
 
-// Close cleanly shuts down the store
+// Close cleanly shuts down the store and empties
+// data and index objects
 func (s *Store) Close() error {
 	s.cleanupTicker.Stop()
 	s.stopCleanup <- true
@@ -1056,9 +1057,15 @@ func (s *Store) Close() error {
 	}
 
 	if s.walFile != nil {
-		s.walFile.Close()
+		if err := s.walFile.Close(); err != nil {
+			return err
+		}
 	}
 
+	s.data = nil
+	s.resourceIndex = nil
+	s.userIndex = nil
+	s.timestampIndex = nil
 	return nil
 }
 
