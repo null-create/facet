@@ -99,6 +99,7 @@ type Store struct {
 	stopCleanup   chan bool
 }
 
+// entry represents a data object in our Store
 type entry struct {
 	key        CompoundKey
 	value      any
