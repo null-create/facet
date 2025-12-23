@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -205,13 +206,10 @@ func BenchmarkQueryByTenant(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
-	var count int
-	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each tenant has ~1000 entries (1% of total)
 		store.Query(WithTenant(uint64(i%100)), func(_ CompoundKey, _ any) bool {
-			count++
-			return count < limit
+			return true
 		})
 	}
 }
@@ -232,13 +230,10 @@ func BenchmarkQueryByUser(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
-	var count int
-	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each user has ~10 entries (0.01% of total)
 		store.Query(WithUser(uint64(i%10000)), func(_ CompoundKey, _ any) bool {
-			count++
-			return count < limit
+			return true
 		})
 	}
 }
@@ -259,13 +254,10 @@ func BenchmarkQueryByResource(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
-	var count int
-	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Each resource has ~10000 entries (10% of total)
 		store.Query(WithResource(fmt.Sprintf("resource_%d", i%10)), func(_ CompoundKey, _ any) bool {
-			count++
-			return count < limit
+			return true
 		})
 	}
 }
@@ -286,13 +278,10 @@ func BenchmarkQueryTenantAndUser(b *testing.B) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
-	var count int
-	var limit = 100000
 	for i := 0; b.Loop(); i++ {
 		// Very selective - typically 1-10 entries
 		store.Query(WithTenantAndUser(uint64(i%100), uint64(i%10000)), func(_ CompoundKey, _ any) bool {
-			count++
-			return count < limit
+			return true
 		})
 	}
 }
@@ -615,15 +604,13 @@ func BenchmarkConcurrentReadWrite(b *testing.B) {
 // ------------------ Unit tests -------------------- //
 
 func TestBasicOperations(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
+	store, err := NewStoreWithOpts("", StoreOpts{
+		WalEnabled:       false,
+		SnapshotsEnabled: false,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
 
 	key := CompoundKey{
 		TenantID:  1,
@@ -645,15 +632,13 @@ func TestBasicOperations(t *testing.T) {
 }
 
 func TestPartialQuery(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
+	store, err := NewStoreWithOpts("", StoreOpts{
+		WalEnabled:       false,
+		SnapshotsEnabled: false,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
 
 	// Add multiple entries
 	for i := range 10 {
@@ -672,23 +657,27 @@ func TestPartialQuery(t *testing.T) {
 		results.keys = append(results.keys, ck)
 		results.values = append(results.values, a)
 		results.count++
-		return results.count < 10
+		return true
 	})
 	if len(results.keys) != 10 {
 		t.Fatalf("Expected 10 results, got %d", len(results.keys))
 	}
+
+	for _, result := range results.values {
+		if !strings.Contains(result.(string), "value_") {
+			t.Fail()
+		}
+	}
 }
 
 func TestRangeQuery(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
+	store, err := NewStoreWithOpts("", StoreOpts{
+		WalEnabled:       false,
+		SnapshotsEnabled: false,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
 
 	// Add entries with sequential timestamps
 	baseTime := int64(1000)
@@ -708,7 +697,7 @@ func TestRangeQuery(t *testing.T) {
 		t.Fatalf("Expected 11 results in range, got %d", len(results))
 	}
 
-	// Query range with filter
+	// Query range with filter (should return ALL tenants)
 	results = store.RangeQuery(baseTime, baseTime+200, WithTenant(1))
 	if len(results) != 20 {
 		t.Fatalf("Expected 20 results with tenant filter, got %d", len(results))
@@ -716,15 +705,13 @@ func TestRangeQuery(t *testing.T) {
 }
 
 func TestTTL(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
+	store, err := NewStoreWithOpts("", StoreOpts{
+		WalEnabled:       false,
+		SnapshotsEnabled: false,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
 
 	key := CompoundKey{
 		TenantID:  1,
