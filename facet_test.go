@@ -8,9 +8,11 @@ import (
 	"time"
 )
 
+// Temp dir for testing data
+var tmpDir = fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
+
 // Helper to create a test store
 func createTestStore(t *testing.B) *Store {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
 	store, err := NewStoreWithOpts(tmpDir, StoreOpts{
 		WalEnabled:       false,
 		SnapshotsEnabled: false,
@@ -23,6 +25,7 @@ func createTestStore(t *testing.B) *Store {
 
 func cleanupTestStore(store *Store, t *testing.B) {
 	store.Close()
+	os.RemoveAll(tmpDir)
 }
 
 // BenchmarkSet measures write performance without TTL
