@@ -29,6 +29,22 @@ func cleanupTestStore(store *Store, t *testing.B) {
 	os.RemoveAll(tmpDir)
 }
 
+// BenchmarkHash measures hash creation performance
+func BenchmarkHash(b *testing.B) {
+	var i = 1
+	b.ResetTimer()
+	for b.Loop() {
+		i++
+		key := CompoundKey{
+			TenantID:  uint64(i),
+			UserID:    uint64(i),
+			Resource:  fmt.Sprintf("resource_%d", i%10),
+			Timestamp: int64(i),
+		}
+		key.Hash()
+	}
+}
+
 // BenchmarkSet measures write performance without TTL
 func BenchmarkSet(b *testing.B) {
 	store := createTestStore(b)
