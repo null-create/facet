@@ -111,6 +111,7 @@ type entry struct {
 
 // TimestampIndex is a simple B-tree-like structure for range queries
 type TimestampIndex struct {
+	mu    sync.Mutex
 	nodes []*TimestampNode
 }
 
@@ -126,6 +127,9 @@ func NewTimestampIndex() *TimestampIndex {
 }
 
 func (idx *TimestampIndex) Add(timestamp int64, keyHash uint64) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
 	// Try to append if possible, otherwise search for best insertion point
 	n := len(idx.nodes)
 	if n == 0 || idx.nodes[n-1].timestamp <= timestamp {
@@ -163,6 +167,9 @@ func (idx *TimestampIndex) Add(timestamp int64, keyHash uint64) {
 }
 
 func (idx *TimestampIndex) Remove(timestamp int64, keyHash uint64) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
 	i := sort.Search(len(idx.nodes), func(i int) bool {
 		return idx.nodes[i].timestamp >= timestamp
 	})
@@ -183,6 +190,9 @@ func (idx *TimestampIndex) Remove(timestamp int64, keyHash uint64) {
 }
 
 func (idx *TimestampIndex) RangeQuery(start, end int64) []uint64 {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
 	results := make([]uint64, 0)
 
 	// Find start position
@@ -200,6 +210,7 @@ func (idx *TimestampIndex) RangeQuery(start, end int64) []uint64 {
 
 // TTL Heap for efficient expiration
 type TTLHeap struct {
+	mu    sync.Mutex
 	items []TTLItem
 }
 
@@ -657,8 +668,6 @@ func (s *Store) startTTLCleanup() {
 
 func (s *Store) cleanupExpired() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	now := time.Now()
 
 	for {
@@ -672,16 +681,18 @@ func (s *Store) cleanupExpired() {
 		if entry, exists := s.data[keyHash]; exists {
 			// Double-check it's actually expired
 			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
-				s.deleteInternal(keyHash)
+				s.mu.Unlock()
+				s.deleteInternal(keyHash) // handles lock
+				s.mu.Lock()
 			}
 		}
 	}
+	s.mu.Unlock()
 }
 
 // Set stores a value with the given compound key and optional TTL
 func (s *Store) Set(key CompoundKey, value any, ttl time.Duration) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	hash := key.Hash()
 
@@ -712,17 +723,20 @@ func (s *Store) Set(key CompoundKey, value any, ttl time.Duration) {
 		s.resourceIndex[key.Resource] = make(map[uint64]bool)
 	}
 	s.resourceIndex[key.Resource][hash] = true
+	s.mu.Unlock()
 
-	// Update timestamp index
+	// Update timestamp index (handles its own lock)
 	s.timestampIndex.Add(key.Timestamp, hash)
 
 	// Add to TTL heap if has expiration
+	s.mu.Lock()
 	if ttl > 0 {
 		s.ttlHeap.Push(hash, e.insertTime.Add(ttl))
 	}
 
 	// Write to WAL
 	s.writeWAL("SET", key, value, ttl)
+	s.mu.Unlock()
 }
 
 func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time.Duration) {
@@ -891,11 +905,11 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 
 // RangeQuery finds all entries with timestamps in the given range
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey, fn QueryCallback) {
+	// Get candidates from timestamp index (handles its own lock)
+	candidateHashes := s.timestampIndex.RangeQuery(startTime, endTime)
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	// Get candidates from timestamp index
-	candidateHashes := s.timestampIndex.RangeQuery(startTime, endTime)
 
 	for _, hash := range candidateHashes {
 		if entry, ok := s.data[hash]; ok {
@@ -915,6 +929,7 @@ func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey, fn Quer
 }
 
 func (s *Store) deleteInternal(hash uint64) {
+	s.mu.Lock()
 	entry := s.data[hash]
 	if entry == nil {
 		return
@@ -930,15 +945,15 @@ func (s *Store) deleteInternal(hash uint64) {
 	delete(s.tenantIndex[key.TenantID], hash)
 	delete(s.userIndex[key.UserID], hash)
 	delete(s.resourceIndex[key.Resource], hash)
+	s.mu.Unlock()
 
-	// Remove from timestamp index
+	// Remove from timestamp index (handles own lock)
 	s.timestampIndex.Remove(key.Timestamp, hash)
 }
 
 // Delete removes entries matching a partial key pattern
 func (s *Store) Delete(partial PartialKey) int {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Find all matching keys
 	var candidates map[uint64]bool
@@ -965,10 +980,15 @@ func (s *Store) Delete(partial PartialKey) int {
 		}
 	}
 
+	s.mu.Unlock()
+
 	// Delete entries
 	for _, hash := range toDelete {
-		s.deleteInternal(hash)
+		s.deleteInternal(hash) // has own lock
+
+		s.mu.Lock()
 		s.writeWAL("DELETE", s.keyMap[hash], nil, 0)
+		s.mu.Unlock()
 	}
 
 	return len(toDelete)
