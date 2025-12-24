@@ -12,7 +12,7 @@ import (
 // Temp dir for testing data
 var tmpDir = fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
 
-// Helper to create a test store
+// Helper to create test stores for benchmark tests
 func createBenchTestStore(t *testing.B) *Store {
 	store, err := NewStoreWithOpts("", StoreOpts{
 		WalEnabled:       false,
@@ -24,6 +24,7 @@ func createBenchTestStore(t *testing.B) *Store {
 	return store
 }
 
+// Helper to create test stores for standard tests
 func createTestStore(t *testing.T) *Store {
 	store, err := NewStoreWithOpts("", StoreOpts{
 		WalEnabled:       false,
