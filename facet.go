@@ -861,7 +861,7 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 	} else if partial.Resource != nil {
 		candidates = s.resourceIndex[*partial.Resource]
 	} else {
-		// fallback: just check everything if no candidates are found
+		// fallback: just check everything if no candidates are found in indicies
 		for _, entry := range s.data {
 			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
 				continue
@@ -890,14 +890,13 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 }
 
 // RangeQuery finds all entries with timestamps in the given range
-func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey) map[CompoundKey]any {
+func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey, fn QueryCallback) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	// Get candidates from timestamp index
 	candidateHashes := s.timestampIndex.RangeQuery(startTime, endTime)
 
-	results := make(map[CompoundKey]any)
 	for _, hash := range candidateHashes {
 		if entry, ok := s.data[hash]; ok {
 			// Skip expired entries
@@ -907,12 +906,12 @@ func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey) map[Com
 
 			// Apply additional filters from partial key
 			if partial.Matches(entry.key) {
-				results[entry.key] = entry.value
+				if !fn(entry.key, entry.value) {
+					return
+				}
 			}
 		}
 	}
-
-	return results
 }
 
 func (s *Store) deleteInternal(hash uint64) {

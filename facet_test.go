@@ -13,7 +13,7 @@ import (
 var tmpDir = fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
 
 // Helper to create a test store
-func createTestStore(t *testing.B) *Store {
+func createBenchTestStore(t *testing.B) *Store {
 	store, err := NewStoreWithOpts("", StoreOpts{
 		WalEnabled:       false,
 		SnapshotsEnabled: false,
@@ -24,7 +24,18 @@ func createTestStore(t *testing.B) *Store {
 	return store
 }
 
-func cleanupTestStore(store *Store, t *testing.B) {
+func createTestStore(t *testing.T) *Store {
+	store, err := NewStoreWithOpts("", StoreOpts{
+		WalEnabled:       false,
+		SnapshotsEnabled: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func cleanupBenchTestStore(store *Store, t *testing.B) {
 	store.Close()
 	os.RemoveAll(tmpDir)
 }
@@ -47,8 +58,8 @@ func BenchmarkHash(b *testing.B) {
 
 // BenchmarkSet measures write performance without TTL
 func BenchmarkSet(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
@@ -64,8 +75,8 @@ func BenchmarkSet(b *testing.B) {
 
 // BenchmarkSetWithTTL measures write performance with TTL
 func BenchmarkSetWithTTL(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
@@ -81,8 +92,8 @@ func BenchmarkSetWithTTL(b *testing.B) {
 
 // BenchmarkSetParallel measures concurrent write performance
 func BenchmarkSetParallel(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -102,8 +113,8 @@ func BenchmarkSetParallel(b *testing.B) {
 
 // BenchmarkGet measures exact key lookup performance
 func BenchmarkGet(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	keys := make([]CompoundKey, 10000)
@@ -128,8 +139,8 @@ func BenchmarkGet(b *testing.B) {
 
 // BenchmarkGetParallel measures concurrent read performance
 func BenchmarkGetParallel(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	keys := make([]CompoundKey, 10000)
@@ -157,8 +168,8 @@ func BenchmarkGetParallel(b *testing.B) {
 }
 
 func BenchmarkQueryFull(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Seed data
 	for i := range 10000 {
@@ -180,14 +191,12 @@ func BenchmarkQueryFull(b *testing.B) {
 }
 
 func BenchmarkQueryLimit(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
-
-	tenant := uint64(1)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	for i := range 10000 {
 		key := CompoundKey{
-			TenantID:  tenant,
+			TenantID:  uint64(i),
 			UserID:    uint64(i),
 			Resource:  "res",
 			Timestamp: int64(i),
@@ -199,7 +208,7 @@ func BenchmarkQueryLimit(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		count := 0
-		store.Query(WithTenant(tenant), func(_ CompoundKey, _ any) bool {
+		store.Query(WithTenant(1), func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
@@ -208,8 +217,8 @@ func BenchmarkQueryLimit(b *testing.B) {
 
 // BenchmarkQueryByTenant measures partial query performance (indexed field)
 func BenchmarkQueryByTenant(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate with 100k entries across 100 tenants
 	for i := range 100000 {
@@ -233,8 +242,8 @@ func BenchmarkQueryByTenant(b *testing.B) {
 
 // BenchmarkQueryByUser measures partial query with different selectivity
 func BenchmarkQueryByUser(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	for i := range 100000 {
@@ -258,8 +267,8 @@ func BenchmarkQueryByUser(b *testing.B) {
 
 // BenchmarkQueryByResource measures query on less selective index
 func BenchmarkQueryByResource(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	for i := range 100000 {
@@ -283,8 +292,8 @@ func BenchmarkQueryByResource(b *testing.B) {
 
 // BenchmarkQueryTenantAndUser measures compound partial query
 func BenchmarkQueryTenantAndUser(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	for i := range 100000 {
@@ -308,8 +317,8 @@ func BenchmarkQueryTenantAndUser(b *testing.B) {
 
 // BenchmarkRangeQuery measures timestamp range query performance
 func BenchmarkRangeQuery(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate with timestamps spread over time
 	baseTime := time.Now().Unix()
@@ -328,14 +337,16 @@ func BenchmarkRangeQuery(b *testing.B) {
 		// Query 1000 entries (1% of data)
 		start := baseTime + int64(i%99000)
 		end := start + 1000
-		store.RangeQuery(start, end, PartialKey{})
+		store.RangeQuery(start, end, PartialKey{}, func(ck CompoundKey, a any) bool {
+			return true
+		})
 	}
 }
 
 // BenchmarkRangeQueryWithFilter measures range query with partial key filter
 func BenchmarkRangeQueryWithFilter(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	baseTime := time.Now().Unix()
@@ -354,14 +365,16 @@ func BenchmarkRangeQueryWithFilter(b *testing.B) {
 		// Query 1000 entries for specific tenant (~10 results)
 		start := baseTime + int64(i%99000)
 		end := start + 1000
-		store.RangeQuery(start, end, WithTenant(uint64(i%100)))
+		store.RangeQuery(start, end, WithTenant(uint64(i%100)), func(ck CompoundKey, a any) bool {
+			return true
+		})
 	}
 }
 
 // BenchmarkDelete measures deletion performance
 func BenchmarkDelete(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
@@ -448,8 +461,8 @@ func BenchmarkKeyHash(b *testing.B) {
 
 // BenchmarkTTLCleanup measures TTL cleanup overhead
 func BenchmarkTTLCleanup(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate with entries that expire quickly
 	for i := range 10000 {
@@ -482,8 +495,8 @@ func BenchmarkTTLCleanup(b *testing.B) {
 
 // Benchmark for mixed workload (realistic usage)
 func BenchmarkMixedWorkload(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	for i := range 10000 {
@@ -535,8 +548,8 @@ func BenchmarkScaleTest_10K(b *testing.B)  { benchmarkScale(b, 10000) }
 func BenchmarkScaleTest_100K(b *testing.B) { benchmarkScale(b, 100000) }
 
 func benchmarkScale(b *testing.B, size int) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	for i := range size {
@@ -560,8 +573,8 @@ func benchmarkScale(b *testing.B, size int) {
 
 // Benchmark for worst-case query (no index available)
 func BenchmarkQueryNoIndex(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	for i := range 10000 {
@@ -587,8 +600,8 @@ func BenchmarkQueryNoIndex(b *testing.B) {
 
 // Benchmarks to verify concurrency safety
 func BenchmarkConcurrentReadWrite(b *testing.B) {
-	store := createTestStore(b)
-	defer cleanupTestStore(store, b)
+	store := createBenchTestStore(b)
+	defer store.Close()
 
 	// Prepopulate
 	for i := range 10000 {
@@ -635,6 +648,7 @@ func TestBasicOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 
 	key := CompoundKey{
 		TenantID:  1,
@@ -663,6 +677,7 @@ func TestPartialQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 
 	// Add multiple entries
 	for i := range 10 {
@@ -678,13 +693,11 @@ func TestPartialQuery(t *testing.T) {
 	// Query by tenant
 	var results QueryResult
 	store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
-		results.keys = append(results.keys, ck)
-		results.values = append(results.values, a)
 		results.count++
 		return true
 	})
-	if len(results.keys) != 10 {
-		t.Fatalf("Expected 10 results, got %d", len(results.keys))
+	if results.count != 10 {
+		t.Fatalf("Expected 10 results, got %d", results.count)
 	}
 
 	for _, result := range results.values {
@@ -702,6 +715,7 @@ func TestRangeQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 
 	// Add entries with sequential timestamps
 	baseTime := int64(1000)
@@ -716,15 +730,23 @@ func TestRangeQuery(t *testing.T) {
 	}
 
 	// Query range [1050, 1150] should return 11 entries
-	results := store.RangeQuery(baseTime+50, baseTime+150, PartialKey{})
-	if len(results) != 11 {
-		t.Fatalf("Expected 11 results in range, got %d", len(results))
+	var results QueryResult
+	store.RangeQuery(baseTime+50, baseTime+150, PartialKey{}, func(ck CompoundKey, a any) bool {
+		results.count++
+		return true
+	})
+	if results.count != 11 {
+		t.Fatalf("Expected 11 results in range, got %d", len(results.keys))
 	}
 
 	// Query range with filter (should return ALL tenants)
-	results = store.RangeQuery(baseTime, baseTime+200, WithTenant(1))
-	if len(results) != 20 {
-		t.Fatalf("Expected 20 results with tenant filter, got %d", len(results))
+	var results2 QueryResult
+	store.RangeQuery(baseTime, baseTime+200, WithTenant(1), func(ck CompoundKey, a any) bool {
+		results2.count++
+		return true
+	})
+	if results2.count != 20 {
+		t.Fatalf("Expected 20 results with tenant filter, got %d", results2.count)
 	}
 }
 
@@ -736,6 +758,7 @@ func TestTTL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 
 	key := CompoundKey{
 		TenantID:  1,
@@ -925,15 +948,8 @@ func TestEmptyWAL(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	tmpDir := fmt.Sprintf("./test_data_%d", time.Now().UnixNano())
-	store, err := NewStore(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		store.Close()
-		os.RemoveAll(tmpDir)
-	}()
+	store := createTestStore(t)
+	defer store.Close()
 
 	// Add entries
 	for i := range 5 {
