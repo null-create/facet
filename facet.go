@@ -23,21 +23,19 @@ type CompoundKey struct {
 	serialized bool
 }
 
-// ToBytes serializes the key for hashing
-func (k *CompoundKey) ToBytes() []byte {
-	buf := make([]byte, 16+len(k.Resource)+8)
-	binary.BigEndian.PutUint64(buf[0:8], k.TenantID)
-	binary.BigEndian.PutUint64(buf[8:16], k.UserID)
-	copy(buf[16:], []byte(k.Resource))
-	binary.BigEndian.PutUint64(buf[16+len(k.Resource):], uint64(k.Timestamp))
-	return buf
-}
-
-// Hash returns a hash of the complete key
+// Hash returns a hash of the complete key and
+// caches it within CompoundKey
 func (k *CompoundKey) Hash() uint64 {
 	if !k.serialized {
+		var buf [8]byte
 		h := fnv.New64a()
-		h.Write(k.ToBytes())
+		binary.BigEndian.PutUint64(buf[:], k.TenantID)
+		h.Write(buf[:])
+		binary.BigEndian.PutUint64(buf[:], k.UserID)
+		h.Write(buf[:])
+		h.Write([]byte(k.Resource))
+		binary.BigEndian.PutUint64(buf[:], uint64(k.Timestamp))
+		h.Write(buf[:])
 		k.hash = h.Sum64()
 		k.serialized = true
 	}
@@ -68,6 +66,10 @@ func (p PartialKey) Matches(k CompoundKey) bool {
 	}
 	return true
 }
+
+// QueryCallback is a callback function invoked when a partial
+// query match is found
+type QueryCallback func(CompoundKey, any) bool
 
 // Store is a concurrent key-value store with partial key query support
 type Store struct {
@@ -828,7 +830,7 @@ func (qr *QueryResult) Get(i int) (CompoundKey, any) {
 }
 
 // Iterate calls fn for each result
-func (qr *QueryResult) Iterate(fn func(CompoundKey, any) bool) {
+func (qr *QueryResult) Iterate(fn QueryCallback) {
 	for i := 0; i < qr.count; i++ {
 		if !fn(qr.keys[i], qr.values[i]) {
 			break
@@ -846,8 +848,8 @@ func (qr *QueryResult) ToMap() map[CompoundKey]any {
 }
 
 // Query finds all entries matching a partial key pattern and
-// calls fn for each match, returns false to stop early
-func (s *Store) Query(partial PartialKey, fn func(CompoundKey, any) bool) {
+// calls fn for each match which returns false to stop early
+func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -859,11 +861,18 @@ func (s *Store) Query(partial PartialKey, fn func(CompoundKey, any) bool) {
 	} else if partial.Resource != nil {
 		candidates = s.resourceIndex[*partial.Resource]
 	} else {
-		// fallback: check everything if no item is found in any of the indices
-		candidates = make(map[uint64]bool, len(s.data))
-		for h := range s.data {
-			candidates[h] = true
+		// fallback: just check everything if no candidates are found
+		for _, entry := range s.data {
+			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
+				continue
+			}
+			if partial.Matches(entry.key) {
+				if !fn(entry.key, entry.value) {
+					return
+				}
+			}
 		}
+		return
 	}
 
 	for hash := range candidates {
