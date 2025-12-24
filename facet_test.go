@@ -35,11 +35,6 @@ func createTestStore(t *testing.T) *Store {
 	return store
 }
 
-func cleanupBenchTestStore(store *Store, t *testing.B) {
-	store.Close()
-	os.RemoveAll(tmpDir)
-}
-
 // BenchmarkHash measures hash creation performance
 func BenchmarkHash(b *testing.B) {
 	var i = 1
