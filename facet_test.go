@@ -180,7 +180,8 @@ func BenchmarkQueryFull(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		store.Query(WithTenant(1), func(_ CompoundKey, _ any) bool {
+		tenantID := uint64(1)
+		store.Query(PartialKey{TenantID: &tenantID}, func(_ CompoundKey, _ any) bool {
 			return true
 		})
 	}
@@ -204,7 +205,8 @@ func BenchmarkQueryLimit(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		count := 0
-		store.Query(WithTenant(1), func(_ CompoundKey, _ any) bool {
+		tenantID := uint64(1)
+		store.Query(PartialKey{TenantID: &tenantID}, func(_ CompoundKey, _ any) bool {
 			count++
 			return count < limit
 		})
@@ -688,7 +690,8 @@ func TestPartialQuery(t *testing.T) {
 
 	// Query by tenant
 	var results QueryResult
-	store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+	tenantID := uint64(1)
+	store.Query(PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
 		results.count++
 		return true
 	})
@@ -714,10 +717,11 @@ func TestRangeQuery(t *testing.T) {
 	defer store.Close()
 
 	// Add entries with sequential timestamps
+	tenantID := uint64(1)
 	baseTime := int64(1000)
 	for i := range 20 {
 		key := CompoundKey{
-			TenantID:  1,
+			TenantID:  tenantID,
 			UserID:    100,
 			Resource:  "event",
 			Timestamp: baseTime + int64(i*10),
@@ -737,7 +741,7 @@ func TestRangeQuery(t *testing.T) {
 
 	// Query range with filter (should return ALL tenants)
 	var results2 QueryResult
-	store.RangeQuery(baseTime, baseTime+200, WithTenant(1), func(ck CompoundKey, a any) bool {
+	store.RangeQuery(baseTime, baseTime+200, PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
 		results2.count++
 		return true
 	})
@@ -816,7 +820,7 @@ func TestTTL(t *testing.T) {
 // 	defer store2.Close()
 
 // 	// Verify data was loaded
-// 	results := store2.Query(WithTenant(1))
+// 	results := store2.Query(PartialKey{TenantID: &uint64(1)})
 // 	if len(results) != 5 {
 // 		t.Fatalf("Expected 5 entries after loading snapshot, got %d", len(results))
 // 	}
@@ -830,9 +834,10 @@ func TestReplayWAL(t *testing.T) {
 	}
 
 	// Add some entries (will be written to WAL)
+	tenantID := uint64(1)
 	for i := range 3 {
 		key := CompoundKey{
-			TenantID:  1,
+			TenantID:  tenantID,
 			UserID:    uint64(200 + i),
 			Resource:  "session",
 			Timestamp: time.Now().Unix(),
@@ -855,14 +860,12 @@ func TestReplayWAL(t *testing.T) {
 
 	// Verify data was replayed from WAL
 	var results QueryResult
-	store2.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+	store2.Query(PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
 		results.count++
-		results.keys = append(results.keys, ck)
-		results.values = append(results.values, a)
 		return results.count < 3
 	})
-	if len(results.keys) != 3 {
-		t.Fatalf("Expected 3 entries after replaying WAL, got %d", len(results.keys))
+	if results.count != 3 {
+		t.Fatalf("Expected 3 entries after replaying WAL, got %d", results.count)
 	}
 }
 
@@ -903,7 +906,7 @@ func TestReplayWAL(t *testing.T) {
 // 	defer store2.Close()
 
 // 	// Expired entry should not be loaded
-// 	results := store2.Query(WithTenant(1))
+// 	results := store2.Query(PartialKey{TenantID: &uint64(1)})
 // 	if len(results) != 0 {
 // 		t.Fatalf("Expected 0 entries (expired), got %d", len(results))
 // 	}
@@ -948,6 +951,7 @@ func TestDelete(t *testing.T) {
 	defer store.Close()
 
 	// Add entries
+	tenantID := uint64(1)
 	for i := range 5 {
 		key := CompoundKey{
 			TenantID:  1,
@@ -959,16 +963,14 @@ func TestDelete(t *testing.T) {
 	}
 
 	// Delete by tenant
-	deleted := store.Delete(WithTenant(1))
+	deleted := store.Delete(PartialKey{TenantID: &tenantID})
 	if deleted != 5 {
 		t.Fatalf("Expected to delete 5 entries, deleted %d", deleted)
 	}
 
 	// Verify deletion
 	var results QueryResult
-	store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
-		results.keys = append(results.keys, ck)
-		results.values = append(results.values, a)
+	store.Query(PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
 		results.count++
 		return results.count == 5
 	})
@@ -991,11 +993,14 @@ func TestConcurrency(t *testing.T) {
 	// Run concurrent writes and reads
 	done := make(chan bool)
 
+	// TenantID
+	tenantID := uint64(1)
+
 	// Writer goroutine
 	go func() {
 		for i := range 1000 {
 			key := CompoundKey{
-				TenantID:  1,
+				TenantID:  tenantID,
 				UserID:    uint64(i),
 				Resource:  "data",
 				Timestamp: time.Now().Unix(),
@@ -1008,7 +1013,7 @@ func TestConcurrency(t *testing.T) {
 	// Reader goroutine
 	go func() {
 		for range 1000 {
-			store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+			store.Query(PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
 				return true
 			})
 		}
@@ -1021,7 +1026,7 @@ func TestConcurrency(t *testing.T) {
 
 	// Verify final state
 	var results QueryResult
-	store.Query(WithTenant(1), func(ck CompoundKey, a any) bool {
+	store.Query(PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
 		results.keys = append(results.keys, ck)
 		results.values = append(results.values, a)
 		results.count++
