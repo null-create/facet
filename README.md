@@ -7,7 +7,7 @@
 / / | (_| | (_|  __/ | |_
 \/   \__,_|\___\___|  \__|
 
-Multi-faceted key-value storage
+💎 Multi-faceted key-value storage 💎
 ```
 
 A high-performance, in-memory key-value store with support for multi-dimensional compound keys, efficient partial queries, TTL expiration, persistent storage, and timestamp range queries.
