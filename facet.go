@@ -129,6 +129,13 @@ func NewTimestampIndex() *TimestampIndex {
 	}
 }
 
+// Finds the insertion point for a given timestamp using binary search
+func (idx *TimestampIndex) findInsertionPoint(timestamp int64) int {
+	return sort.Search(len(idx.nodes), func(i int) bool {
+		return idx.nodes[i].timestamp >= timestamp
+	})
+}
+
 func (idx *TimestampIndex) Add(timestamp int64, keyHash uint64) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -149,9 +156,7 @@ func (idx *TimestampIndex) Add(timestamp int64, keyHash uint64) {
 	}
 
 	// Binary search for insertion point
-	i := sort.Search(len(idx.nodes), func(i int) bool {
-		return idx.nodes[i].timestamp >= timestamp
-	})
+	i := idx.findInsertionPoint(timestamp)
 
 	if i < len(idx.nodes) && idx.nodes[i].timestamp == timestamp {
 		// Timestamp exists, add to this node
@@ -173,9 +178,7 @@ func (idx *TimestampIndex) Remove(timestamp int64, keyHash uint64) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	i := sort.Search(len(idx.nodes), func(i int) bool {
-		return idx.nodes[i].timestamp >= timestamp
-	})
+	i := idx.findInsertionPoint(timestamp)
 
 	if i < len(idx.nodes) && idx.nodes[i].timestamp == timestamp {
 		node := idx.nodes[i]
@@ -198,9 +201,7 @@ func (idx *TimestampIndex) RangeQuery(start, end int64, fn RangeQueryCallback) {
 	defer idx.mu.Unlock()
 
 	// Find start position
-	startIdx := sort.Search(len(idx.nodes), func(i int) bool {
-		return idx.nodes[i].timestamp >= start
-	})
+	startIdx := idx.findInsertionPoint(start)
 
 	// Iterate over all hashes in range and call fn. Stop if fn returns false.
 	for i := startIdx; i < len(idx.nodes) && idx.nodes[i].timestamp <= end; i++ {
