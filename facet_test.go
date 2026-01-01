@@ -498,11 +498,10 @@ func benchmarkScale(b *testing.B, size int) {
 		store.Set(key, fmt.Sprintf("value_%d", i), 0)
 	}
 
-	var count int
 	for i := 0; b.Loop(); i++ {
-		store.Query(WithTenant(uint64(i%100)), func(ck CompoundKey, a any) bool {
-			count++
-			return count < size
+		tenantID := uint64(i % 100)
+		store.Query(PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
+			return true
 		})
 	}
 }
