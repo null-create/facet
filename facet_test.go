@@ -182,7 +182,8 @@ func BenchmarkQueryByTenant(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Each tenant has ~1000 entries (1% of total)
-		store.Query(WithTenant(uint64(i%100)), func(_ CompoundKey, _ any) bool {
+		tenantID := uint64(i % 100)
+		store.Query(PartialKey{TenantID: &tenantID}, func(_ CompoundKey, _ any) bool {
 			return true
 		})
 	}
@@ -207,7 +208,8 @@ func BenchmarkQueryByUser(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Each user has ~10 entries (0.01% of total)
-		store.Query(WithUser(uint64(i%10000)), func(_ CompoundKey, _ any) bool {
+		userID := uint64(i % 10000)
+		store.Query(PartialKey{UserID: &userID}, func(_ CompoundKey, _ any) bool {
 			return true
 		})
 	}
