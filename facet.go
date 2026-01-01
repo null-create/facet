@@ -202,7 +202,7 @@ func (idx *TimestampIndex) RangeQuery(start, end int64, fn RangeQueryCallback) {
 		return idx.nodes[i].timestamp >= start
 	})
 
-	// Collect all hashes in range
+	// Iterate over all hashes in range and call fn. Stop if fn returns false.
 	for i := startIdx; i < len(idx.nodes) && idx.nodes[i].timestamp <= end; i++ {
 		if !fn(idx.nodes[i].keyHashes) {
 			break
@@ -907,15 +907,15 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 
 // RangeQuery finds all entries with timestamps in the given range
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey, fn QueryCallback) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	// Get candidates from timestamp index (handles its own lock)
 	var candidateHashes []uint64
 	s.timestampIndex.RangeQuery(startTime, endTime, func(hashs []uint64) bool {
 		candidateHashes = append(candidateHashes, hashs...)
 		return true
 	})
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	for _, hash := range candidateHashes {
 		if entry, ok := s.data[hash]; ok {
@@ -938,6 +938,7 @@ func (s *Store) deleteInternal(hash uint64) {
 	s.mu.Lock()
 	entry := s.data[hash]
 	if entry == nil {
+		s.mu.Unlock()
 		return
 	}
 
