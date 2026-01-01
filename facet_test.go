@@ -316,7 +316,8 @@ func BenchmarkRangeQueryWithFilter(b *testing.B) {
 		// Query 1000 entries for specific tenant (~10 results)
 		start := baseTime + int64(i%99000)
 		end := start + 1000
-		store.RangeQuery(start, end, WithTenant(uint64(i%100)), func(ck CompoundKey, a any) bool {
+		tenantID := uint64(i % 100)
+		store.RangeQuery(start, end, PartialKey{TenantID: &tenantID}, func(ck CompoundKey, a any) bool {
 			return true
 		})
 	}
@@ -327,22 +328,21 @@ func BenchmarkDelete(b *testing.B) {
 	store := createBenchTestStore(b)
 	defer store.Close()
 
-	for i := 0; b.Loop(); i++ {
-		b.StopTimer()
-		// Repopulate for each iteration
-		for j := range 1000 {
-			key := CompoundKey{
-				TenantID:  uint64(i % 10),
-				UserID:    uint64(j),
-				Resource:  "resource",
-				Timestamp: time.Now().Unix(),
-			}
-			store.Set(key, "value", 0)
+	// Prepopulate
+	for i := range 100000 {
+		key := CompoundKey{
+			TenantID:  uint64(i % 10),
+			UserID:    uint64(i),
+			Resource:  "resource",
+			Timestamp: time.Now().Unix(),
 		}
-		b.StartTimer()
+		store.Set(key, "value", 0)
+	}
 
-		// Delete by tenant (~100 entries)
-		store.Delete(WithTenant(uint64(i % 10)))
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		tenantID := uint64(i % 10)
+		store.Delete(PartialKey{TenantID: &tenantID})
 	}
 }
 
