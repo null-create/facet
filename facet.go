@@ -71,6 +71,9 @@ func (p PartialKey) Matches(k CompoundKey) bool {
 // query match is found
 type QueryCallback func(CompoundKey, any) bool
 
+// RangeQueryCallback is a callback function for range queries
+type RangeQueryCallback func([]uint64) bool
+
 // Store is a concurrent key-value store with partial key query support
 type Store struct {
 	mu   sync.RWMutex
@@ -189,11 +192,10 @@ func (idx *TimestampIndex) Remove(timestamp int64, keyHash uint64) {
 	}
 }
 
-func (idx *TimestampIndex) RangeQuery(start, end int64) []uint64 {
+// Collects all hashed keys within a given timestamp range
+func (idx *TimestampIndex) RangeQuery(start, end int64, fn RangeQueryCallback) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-
-	results := make([]uint64, 0)
 
 	// Find start position
 	startIdx := sort.Search(len(idx.nodes), func(i int) bool {
@@ -202,10 +204,10 @@ func (idx *TimestampIndex) RangeQuery(start, end int64) []uint64 {
 
 	// Collect all hashes in range
 	for i := startIdx; i < len(idx.nodes) && idx.nodes[i].timestamp <= end; i++ {
-		results = append(results, idx.nodes[i].keyHashes...)
+		if !fn(idx.nodes[i].keyHashes) {
+			break
+		}
 	}
-
-	return results
 }
 
 // TTL Heap for efficient expiration
@@ -905,11 +907,15 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 
 // RangeQuery finds all entries with timestamps in the given range
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey, fn QueryCallback) {
-	// Get candidates from timestamp index (handles its own lock)
-	candidateHashes := s.timestampIndex.RangeQuery(startTime, endTime)
-
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	// Get candidates from timestamp index (handles its own lock)
+	var candidateHashes []uint64
+	s.timestampIndex.RangeQuery(startTime, endTime, func(hashs []uint64) bool {
+		candidateHashes = append(candidateHashes, hashs...)
+		return true
+	})
 
 	for _, hash := range candidateHashes {
 		if entry, ok := s.data[hash]; ok {

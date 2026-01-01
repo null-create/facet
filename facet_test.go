@@ -163,56 +163,6 @@ func BenchmarkGetParallel(b *testing.B) {
 	})
 }
 
-func BenchmarkQueryFull(b *testing.B) {
-	store := createBenchTestStore(b)
-	defer store.Close()
-
-	// Seed data
-	for i := range 10000 {
-		key := CompoundKey{
-			TenantID:  uint64(i % 100),
-			UserID:    uint64(i),
-			Resource:  fmt.Sprintf("resource_%d", i%10),
-			Timestamp: int64(i),
-		}
-		store.Set(key, fmt.Sprintf("value_%d", i), 0)
-	}
-
-	b.ResetTimer()
-	for b.Loop() {
-		tenantID := uint64(1)
-		store.Query(PartialKey{TenantID: &tenantID}, func(_ CompoundKey, _ any) bool {
-			return true
-		})
-	}
-}
-
-func BenchmarkQueryLimit(b *testing.B) {
-	store := createBenchTestStore(b)
-	defer store.Close()
-
-	for i := range 10000 {
-		key := CompoundKey{
-			TenantID:  uint64(i),
-			UserID:    uint64(i),
-			Resource:  "res",
-			Timestamp: int64(i),
-		}
-		store.Set(key, i, 0)
-	}
-
-	limit := 100
-	b.ResetTimer()
-	for b.Loop() {
-		count := 0
-		tenantID := uint64(1)
-		store.Query(PartialKey{TenantID: &tenantID}, func(_ CompoundKey, _ any) bool {
-			count++
-			return count < limit
-		})
-	}
-}
-
 // BenchmarkQueryByTenant measures partial query performance (indexed field)
 func BenchmarkQueryByTenant(b *testing.B) {
 	store := createBenchTestStore(b)
@@ -282,7 +232,8 @@ func BenchmarkQueryByResource(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Each resource has ~10000 entries (10% of total)
-		store.Query(WithResource(fmt.Sprintf("resource_%d", i%10)), func(_ CompoundKey, _ any) bool {
+		resource := fmt.Sprintf("resource_%d", i%10)
+		store.Query(PartialKey{Resource: &resource}, func(_ CompoundKey, _ any) bool {
 			return true
 		})
 	}
@@ -307,7 +258,9 @@ func BenchmarkQueryTenantAndUser(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		// Very selective - typically 1-10 entries
-		store.Query(WithTenantAndUser(uint64(i%100), uint64(i%10000)), func(_ CompoundKey, _ any) bool {
+		tenantID := uint64(i % 100)
+		userID := uint64(i % 10000)
+		store.Query(PartialKey{TenantID: &tenantID, UserID: &userID}, func(_ CompoundKey, _ any) bool {
 			return true
 		})
 	}
@@ -1047,15 +1000,24 @@ func TestTimestampIndex(t *testing.T) {
 	idx.Add(100, 4) // Same timestamp
 
 	// Range query
-	results := idx.RangeQuery(90, 160)
+	var results []uint64
+	idx.RangeQuery(90, 160, func(hashs []uint64) bool {
+		results = append(results, hashs...)
+		return true
+	})
 	if len(results) != 3 { // Should get hashes 1, 4, 3
 		t.Fatalf("Expected 3 results, got %d", len(results))
 	}
 
 	// Remove and query again
 	idx.Remove(100, 1)
-	results = idx.RangeQuery(90, 160)
-	if len(results) != 2 { // Should get hashes 4, 3
+
+	var results2 []uint64
+	idx.RangeQuery(90, 160, func(hashs []uint64) bool {
+		results2 = append(results2, hashs...)
+		return true
+	})
+	if len(results2) != 2 { // Should get hashes 4, 3
 		t.Fatalf("Expected 2 results after removal, got %d", len(results))
 	}
 }
