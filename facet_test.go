@@ -38,10 +38,8 @@ func createTestStore(t *testing.T) *Store {
 
 // BenchmarkHash measures hash creation performance
 func BenchmarkHash(b *testing.B) {
-	var i = 1
 	b.ResetTimer()
-	for b.Loop() {
-		i++
+	for i := 0; b.Loop(); i++ {
 		key := CompoundKey{
 			TenantID:  uint64(i),
 			UserID:    uint64(i),
