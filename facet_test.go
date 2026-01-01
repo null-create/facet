@@ -361,21 +361,6 @@ func BenchmarkKeyHash(b *testing.B) {
 	}
 }
 
-// BenchmarkKeyToBytes measures serialization performance
-// func BenchmarkKeyToBytes(b *testing.B) {
-// 	key := CompoundKey{
-// 		TenantID:  12345,
-// 		UserID:    67890,
-// 		Resource:  "orders",
-// 		Timestamp: time.Now().Unix(),
-// 	}
-
-// 	b.ResetTimer()
-// 	for b.Loop() {
-// 		key.ToBytes()
-// 	}
-// }
-
 // // Comparative benchmark: Simulate Redis-style string key operations
 // func BenchmarkStringKeySet(b *testing.B) {
 // 	store := make(map[string]any)
