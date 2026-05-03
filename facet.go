@@ -8,9 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/btree"
 )
 
 // CompoundKey represents a multi-dimensional cache key
@@ -55,6 +56,15 @@ func NewCompoundKey(tenantID, userID uint64, resource string, timestamp int64) C
 	return k
 }
 
+// hashResource hashes a resource string to uint64 for indexed lookups.
+// This allows the resource index to use uint64 keys instead of strings,
+// which is faster for map operations.
+func hashResource(name string) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(name))
+	return h.Sum64()
+}
+
 // PartialKey represents a query pattern where some fields may be wildcards
 type PartialKey struct {
 	TenantID  *uint64
@@ -94,9 +104,10 @@ type Store struct {
 	data  map[uint64]*entry // main data store (keyed by full key hash)
 
 	// Secondary indexes for efficient partial queries (struct{} reduces memory vs bool)
-	tenantIndex   map[uint64]map[uint64]struct{} // tenant -> set of key hashes
-	userIndex     map[uint64]map[uint64]struct{} // user -> set of key hashes
-	resourceIndex map[string]map[uint64]struct{} // resource -> set of key hashes
+	tenantIndex       map[uint64]map[uint64]struct{} // tenant -> set of key hashes
+	userIndex         map[uint64]map[uint64]struct{} // user -> set of key hashes
+	resourceIndex     map[string]map[uint64]struct{} // resource -> set of key hashes (kept for lookup by name)
+	resourceHashIndex map[uint64]map[uint64]struct{} // resource hash -> set of key hashes (fast index)
 
 	// Reverse mapping from hash to full key for lookups
 	keyMap map[uint64]CompoundKey
@@ -126,110 +137,103 @@ type entry struct {
 	ttl        time.Duration // 0 means no expiration
 }
 
-// TimestampIndex is a simple B-tree-like structure for range queries
-type TimestampIndex struct {
-	mu    sync.RWMutex
-	nodes []*TimestampNode
-}
-
-type TimestampNode struct {
+// timestampItem is a B-tree item for timestamp-based range queries.
+// It implements btree.Item interface for use with github.com/google/btree.
+type timestampItem struct {
 	timestamp int64
 	keyHashes []uint64
 }
 
+// Less returns true if this item's timestamp is less than the other's.
+// Implements btree.Item interface.
+func (t *timestampItem) Less(than btree.Item) bool {
+	return t.timestamp < than.(*timestampItem).timestamp
+}
+
+// TimestampIndex uses a B-tree for efficient range queries on timestamps.
+type TimestampIndex struct {
+	mu   sync.RWMutex
+	tree *btree.BTree
+}
+
+// NewTimestampIndex creates a new timestamp index backed by a B-tree.
+// The B-tree degree is set to 32 for good cache performance.
 func NewTimestampIndex() *TimestampIndex {
 	return &TimestampIndex{
-		nodes: make([]*TimestampNode, 0),
+		tree: btree.New(32),
 	}
 }
 
-// Finds the insertion point for a given timestamp using binary search
-func (idx *TimestampIndex) findInsertionPoint(timestamp int64) int {
-	return sort.Search(len(idx.nodes), func(i int) bool {
-		return idx.nodes[i].timestamp >= timestamp
-	})
-}
-
+// Add inserts or updates a timestamp entry with the given key hash.
+// If the timestamp already exists, the hash is appended to the existing slice.
 func (idx *TimestampIndex) Add(timestamp int64, keyHash uint64) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	// Try to append if possible, otherwise search for best insertion point
-	n := len(idx.nodes)
-	if n == 0 || idx.nodes[n-1].timestamp <= timestamp {
-		// fast path: append to end (most writes are monotonic)
-		if n > 0 && idx.nodes[n-1].timestamp == timestamp {
-			idx.nodes[n-1].keyHashes = append(idx.nodes[n-1].keyHashes, keyHash)
-			return
-		}
-		idx.nodes = append(idx.nodes, &TimestampNode{
+	item := &timestampItem{timestamp: timestamp}
+	existing := idx.tree.Get(item)
+	if existing != nil {
+		// Timestamp exists, append to existing hashes
+			ti := existing.(*timestampItem)
+		ti.keyHashes = append(ti.keyHashes, keyHash)
+	} else {
+		// New timestamp, insert fresh item
+		idx.tree.ReplaceOrInsert(&timestampItem{
 			timestamp: timestamp,
 			keyHashes: []uint64{keyHash},
 		})
-		return
-	}
-
-	// Binary search for insertion point
-	i := idx.findInsertionPoint(timestamp)
-
-	if i < len(idx.nodes) && idx.nodes[i].timestamp == timestamp {
-		// Timestamp exists, add to this node
-		idx.nodes[i].keyHashes = append(idx.nodes[i].keyHashes, keyHash)
-	} else {
-		// Create new node
-		node := &TimestampNode{
-			timestamp: timestamp,
-			keyHashes: []uint64{keyHash},
-		}
-		// Insert at position i
-		idx.nodes = append(idx.nodes, nil)
-		copy(idx.nodes[i+1:], idx.nodes[i:])
-		idx.nodes[i] = node
 	}
 }
 
+// Remove deletes a key hash from the given timestamp entry.
+// If no hashes remain for that timestamp, the entry is removed entirely.
 func (idx *TimestampIndex) Remove(timestamp int64, keyHash uint64) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	i := idx.findInsertionPoint(timestamp)
+	item := &timestampItem{timestamp: timestamp}
+	existing := idx.tree.Get(item)
+	if existing == nil {
+		return
+	}
 
-	if i < len(idx.nodes) && idx.nodes[i].timestamp == timestamp {
-		node := idx.nodes[i]
-		for j, h := range node.keyHashes {
-			if h == keyHash {
-				node.keyHashes = append(node.keyHashes[:j], node.keyHashes[j+1:]...)
-				break
-			}
+	ti := existing.(*timestampItem)
+	// Remove keyHash from slice
+	for i, h := range ti.keyHashes {
+		if h == keyHash {
+			ti.keyHashes = append(ti.keyHashes[:i], ti.keyHashes[i+1:]...)
+			break
 		}
-		// Remove node if empty
-		if len(node.keyHashes) == 0 {
-			idx.nodes = append(idx.nodes[:i], idx.nodes[i+1:]...)
-		}
+	}
+	// Remove entry if no hashes remain
+	if len(ti.keyHashes) == 0 {
+		idx.tree.Delete(item)
 	}
 }
 
-// Collects all hashed keys within a given timestamp range
-// Calls fn for each slice of key hashes; fn returns false to stop early
+// RangeQuery calls fn for each set of key hashes within [start, end].
+// fn returns false to stop iteration early.
 func (idx *TimestampIndex) RangeQuery(start, end int64, fn RangeQueryCallback) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	// Find start position
-	startIdx := idx.findInsertionPoint(start)
+	startItem := &timestampItem{timestamp: start}
 
-	// Iterate over all hashes in range and call fn. Stop if fn returns false.
-	for i := startIdx; i < len(idx.nodes) && idx.nodes[i].timestamp <= end; i++ {
-		if !fn(idx.nodes[i].keyHashes) {
-			break
+	// AscendGreaterOrEqual iterates from start, stopping when fn returns false
+	idx.tree.AscendGreaterOrEqual(startItem, func(i btree.Item) bool {
+		ti := i.(*timestampItem)
+		if ti.timestamp > end {
+			return false // Stop: past the end of range
 		}
-	}
+		return fn(ti.keyHashes)
+	})
 }
 
 // TTL Heap for efficient expiration
 // Note: This heap is accessed ONLY from:
 //   - Store.Set (under s.mu lock)
 //   - Store.cleanupExpired (single goroutine, under s.mu lock)
+//
 // Therefore no internal locking is needed.
 type TTLHeap struct {
 	items []TTLItem
@@ -317,18 +321,19 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	store := &Store{
-		data:            make(map[uint64]*entry),
-		tenantIndex:     make(map[uint64]map[uint64]struct{}),
-		userIndex:       make(map[uint64]map[uint64]struct{}),
-		resourceIndex:   make(map[string]map[uint64]struct{}),
-		keyMap:          make(map[uint64]CompoundKey),
-		timestampIndex:  NewTimestampIndex(),
-		ttlHeap:         NewTTLHeap(),
-		walPath:         filepath.Join(dataDir, "wal.log"),
-		snapShotEnabled: true,
-		snapshotPath:    filepath.Join(dataDir, "snapshot.pb"),
-		stopCleanup:     make(chan bool),
-		walEnabled:      true,
+		data:              make(map[uint64]*entry),
+		tenantIndex:       make(map[uint64]map[uint64]struct{}),
+		userIndex:         make(map[uint64]map[uint64]struct{}),
+		resourceIndex:     make(map[string]map[uint64]struct{}),
+		resourceHashIndex: make(map[uint64]map[uint64]struct{}),
+		keyMap:            make(map[uint64]CompoundKey),
+		timestampIndex:    NewTimestampIndex(),
+		ttlHeap:           NewTTLHeap(),
+		walPath:           filepath.Join(dataDir, "wal.log"),
+		snapShotEnabled:   true,
+		snapshotPath:      filepath.Join(dataDir, "snapshot.pb"),
+		stopCleanup:       make(chan bool),
+		walEnabled:        true,
 	}
 
 	// Load from disk
@@ -366,18 +371,19 @@ func NewStoreWithOpts(dataDir string, opts StoreOpts) (*Store, error) {
 	}
 
 	store := &Store{
-		data:            make(map[uint64]*entry),
-		tenantIndex:     make(map[uint64]map[uint64]struct{}),
-		userIndex:       make(map[uint64]map[uint64]struct{}),
-		resourceIndex:   make(map[string]map[uint64]struct{}),
-		keyMap:          make(map[uint64]CompoundKey),
-		timestampIndex:  NewTimestampIndex(),
-		ttlHeap:         NewTTLHeap(),
-		walEnabled:      opts.WalEnabled,
-		walPath:         opts.WalPath,
-		snapShotEnabled: opts.SnapshotsEnabled,
-		snapshotPath:    opts.SnapshotPath,
-		stopCleanup:     make(chan bool),
+		data:              make(map[uint64]*entry),
+		tenantIndex:       make(map[uint64]map[uint64]struct{}),
+		userIndex:         make(map[uint64]map[uint64]struct{}),
+		resourceIndex:     make(map[string]map[uint64]struct{}),
+		resourceHashIndex: make(map[uint64]map[uint64]struct{}),
+		keyMap:            make(map[uint64]CompoundKey),
+		timestampIndex:    NewTimestampIndex(),
+		ttlHeap:           NewTTLHeap(),
+		walEnabled:        opts.WalEnabled,
+		walPath:           opts.WalPath,
+		snapShotEnabled:   opts.SnapshotsEnabled,
+		snapshotPath:      opts.SnapshotPath,
+		stopCleanup:       make(chan bool),
 	}
 
 	// Load from disk if needed
@@ -544,6 +550,13 @@ func (s *Store) loadSnapshot() error {
 				s.resourceIndex[key.Resource] = make(map[uint64]struct{})
 			}
 			s.resourceIndex[key.Resource][hash] = struct{}{}
+
+			// Rebuild resource hash index (fast uint64 lookup)
+			resourceHash := hashResource(key.Resource)
+			if s.resourceHashIndex[resourceHash] == nil {
+				s.resourceHashIndex[resourceHash] = make(map[uint64]struct{})
+			}
+			s.resourceHashIndex[resourceHash][hash] = struct{}{}
 
 			s.timestampIndex.Add(key.Timestamp, hash)
 
@@ -745,6 +758,13 @@ func (s *Store) Set(key CompoundKey, value any, ttl time.Duration) {
 	}
 	s.resourceIndex[key.Resource][hash] = struct{}{}
 
+	// Update resource hash index (fast uint64-based lookup)
+	resourceHash := hashResource(key.Resource)
+	if s.resourceHashIndex[resourceHash] == nil {
+		s.resourceHashIndex[resourceHash] = make(map[uint64]struct{})
+	}
+	s.resourceHashIndex[resourceHash][hash] = struct{}{}
+
 	// Write to WAL (while holding store lock for consistency)
 	s.writeWAL("SET", key, value, ttl)
 
@@ -918,7 +938,8 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 		}
 	}
 	if partial.Resource != nil {
-		if idx, ok := s.resourceIndex[*partial.Resource]; ok {
+		resourceHash := hashResource(*partial.Resource)
+		if idx, ok := s.resourceHashIndex[resourceHash]; ok {
 			if minSize == -1 || len(idx) < minSize {
 				minSize = len(idx)
 				candidates = idx
@@ -973,29 +994,36 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 	}
 }
 
-// RangeQuery finds all entries with timestamps in the given range
+// RangeQuery finds all entries with timestamps in the given range.
+// It collects all candidate hashes first (under timestampIndex lock),
+// then processes them under a single store read lock for efficiency.
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey, fn QueryCallback) {
+	// Collect all candidate hashes from timestamp index
+	var allHashes []uint64
 	s.timestampIndex.RangeQuery(startTime, endTime, func(hashes []uint64) bool {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
+		allHashes = append(allHashes, hashes...)
+		return true
+	})
 
-		for _, hash := range hashes {
-			if entry, ok := s.data[hash]; ok {
-				// Skip expired entries
-				if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
-					continue
-				}
+	// Process candidates under a single read lock
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-				// Apply additional filters from partial key
-				if partial.Matches(entry.key) {
-					if !fn(entry.key, entry.value) {
-						return false
-					}
+	for _, hash := range allHashes {
+		if entry, ok := s.data[hash]; ok {
+			// Skip expired entries
+			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
+				continue
+			}
+
+			// Apply additional filters from partial key
+			if partial.Matches(entry.key) {
+				if !fn(entry.key, entry.value) {
+					return
 				}
 			}
 		}
-		return true
-	})
+	}
 }
 
 func (s *Store) deleteInternal(hash uint64) {
@@ -1016,6 +1044,11 @@ func (s *Store) deleteInternal(hash uint64) {
 	delete(s.tenantIndex[key.TenantID], hash)
 	delete(s.userIndex[key.UserID], hash)
 	delete(s.resourceIndex[key.Resource], hash)
+
+	// Remove from resource hash index
+	resourceHash := hashResource(key.Resource)
+	delete(s.resourceHashIndex[resourceHash], hash)
+
 	s.mu.Unlock()
 
 	// Remove from timestamp index (handles own lock)
@@ -1046,7 +1079,8 @@ func (s *Store) Delete(partial PartialKey) int {
 		}
 	}
 	if partial.Resource != nil {
-		if idx, ok := s.resourceIndex[*partial.Resource]; ok {
+		resourceHash := hashResource(*partial.Resource)
+		if idx, ok := s.resourceHashIndex[resourceHash]; ok {
 			if minSize == -1 || len(idx) < minSize {
 				minSize = len(idx)
 				candidates = idx
@@ -1187,6 +1221,7 @@ func (s *Store) Close() error {
 
 	s.data = nil
 	s.resourceIndex = nil
+	s.resourceHashIndex = nil
 	s.userIndex = nil
 	s.timestampIndex = nil
 	return nil
@@ -1198,10 +1233,11 @@ func (s *Store) Stats() map[string]int {
 	defer s.mu.RUnlock()
 
 	return map[string]int{
-		"entries":   len(s.data),
-		"tenants":   len(s.tenantIndex),
-		"users":     len(s.userIndex),
-		"resources": len(s.resourceIndex),
+		"entries":         len(s.data),
+		"tenants":         len(s.tenantIndex),
+		"users":           len(s.userIndex),
+		"resources":       len(s.resourceIndex),
+		"resourceHashes": len(s.resourceHashIndex),
 	}
 }
 
