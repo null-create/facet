@@ -42,6 +42,19 @@ func (k *CompoundKey) Hash() uint64 {
 	return k.hash
 }
 
+// NewCompoundKey creates a new compound key with precomputed hash.
+// This avoids recomputing the hash on every operation.
+func NewCompoundKey(tenantID, userID uint64, resource string, timestamp int64) CompoundKey {
+	k := CompoundKey{
+		TenantID:  tenantID,
+		UserID:    userID,
+		Resource:  resource,
+		Timestamp: timestamp,
+	}
+	k.Hash() // Precompute and cache the hash
+	return k
+}
+
 // PartialKey represents a query pattern where some fields may be wildcards
 type PartialKey struct {
 	TenantID  *uint64
@@ -76,13 +89,14 @@ type RangeQueryCallback func([]uint64) bool
 
 // Store is a concurrent key-value store with partial key query support
 type Store struct {
-	mu   sync.RWMutex
-	data map[uint64]*entry // main data store (keyed by full key hash)
+	mu    sync.RWMutex
+	walMu sync.Mutex        // Serializes WAL writes
+	data  map[uint64]*entry // main data store (keyed by full key hash)
 
-	// Secondary indexes for efficient partial queries
-	tenantIndex   map[uint64]map[uint64]bool // tenant -> set of key hashes
-	userIndex     map[uint64]map[uint64]bool // user -> set of key hashes
-	resourceIndex map[string]map[uint64]bool // resource -> set of key hashes
+	// Secondary indexes for efficient partial queries (struct{} reduces memory vs bool)
+	tenantIndex   map[uint64]map[uint64]struct{} // tenant -> set of key hashes
+	userIndex     map[uint64]map[uint64]struct{} // user -> set of key hashes
+	resourceIndex map[string]map[uint64]struct{} // resource -> set of key hashes
 
 	// Reverse mapping from hash to full key for lookups
 	keyMap map[uint64]CompoundKey
@@ -114,7 +128,7 @@ type entry struct {
 
 // TimestampIndex is a simple B-tree-like structure for range queries
 type TimestampIndex struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	nodes []*TimestampNode
 }
 
@@ -196,9 +210,10 @@ func (idx *TimestampIndex) Remove(timestamp int64, keyHash uint64) {
 }
 
 // Collects all hashed keys within a given timestamp range
+// Calls fn for each slice of key hashes; fn returns false to stop early
 func (idx *TimestampIndex) RangeQuery(start, end int64, fn RangeQueryCallback) {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
 
 	// Find start position
 	startIdx := idx.findInsertionPoint(start)
@@ -212,8 +227,11 @@ func (idx *TimestampIndex) RangeQuery(start, end int64, fn RangeQueryCallback) {
 }
 
 // TTL Heap for efficient expiration
+// Note: This heap is accessed ONLY from:
+//   - Store.Set (under s.mu lock)
+//   - Store.cleanupExpired (single goroutine, under s.mu lock)
+// Therefore no internal locking is needed.
 type TTLHeap struct {
-	mu    sync.Mutex
 	items []TTLItem
 }
 
@@ -300,9 +318,9 @@ func NewStore(dataDir string) (*Store, error) {
 
 	store := &Store{
 		data:            make(map[uint64]*entry),
-		tenantIndex:     make(map[uint64]map[uint64]bool),
-		userIndex:       make(map[uint64]map[uint64]bool),
-		resourceIndex:   make(map[string]map[uint64]bool),
+		tenantIndex:     make(map[uint64]map[uint64]struct{}),
+		userIndex:       make(map[uint64]map[uint64]struct{}),
+		resourceIndex:   make(map[string]map[uint64]struct{}),
 		keyMap:          make(map[uint64]CompoundKey),
 		timestampIndex:  NewTimestampIndex(),
 		ttlHeap:         NewTTLHeap(),
@@ -349,9 +367,9 @@ func NewStoreWithOpts(dataDir string, opts StoreOpts) (*Store, error) {
 
 	store := &Store{
 		data:            make(map[uint64]*entry),
-		tenantIndex:     make(map[uint64]map[uint64]bool),
-		userIndex:       make(map[uint64]map[uint64]bool),
-		resourceIndex:   make(map[string]map[uint64]bool),
+		tenantIndex:     make(map[uint64]map[uint64]struct{}),
+		userIndex:       make(map[uint64]map[uint64]struct{}),
+		resourceIndex:   make(map[string]map[uint64]struct{}),
 		keyMap:          make(map[uint64]CompoundKey),
 		timestampIndex:  NewTimestampIndex(),
 		ttlHeap:         NewTTLHeap(),
@@ -513,19 +531,19 @@ func (s *Store) loadSnapshot() error {
 
 			// Rebuild indexes
 			if s.tenantIndex[key.TenantID] == nil {
-				s.tenantIndex[key.TenantID] = make(map[uint64]bool)
+				s.tenantIndex[key.TenantID] = make(map[uint64]struct{})
 			}
-			s.tenantIndex[key.TenantID][hash] = true
+			s.tenantIndex[key.TenantID][hash] = struct{}{}
 
 			if s.userIndex[key.UserID] == nil {
-				s.userIndex[key.UserID] = make(map[uint64]bool)
+				s.userIndex[key.UserID] = make(map[uint64]struct{})
 			}
-			s.userIndex[key.UserID][hash] = true
+			s.userIndex[key.UserID][hash] = struct{}{}
 
 			if s.resourceIndex[key.Resource] == nil {
-				s.resourceIndex[key.Resource] = make(map[uint64]bool)
+				s.resourceIndex[key.Resource] = make(map[uint64]struct{})
 			}
-			s.resourceIndex[key.Resource][hash] = true
+			s.resourceIndex[key.Resource][hash] = struct{}{}
 
 			s.timestampIndex.Add(key.Timestamp, hash)
 
@@ -713,33 +731,32 @@ func (s *Store) Set(key CompoundKey, value any, ttl time.Duration) {
 
 	// Update indexes
 	if s.tenantIndex[key.TenantID] == nil {
-		s.tenantIndex[key.TenantID] = make(map[uint64]bool)
+		s.tenantIndex[key.TenantID] = make(map[uint64]struct{})
 	}
-	s.tenantIndex[key.TenantID][hash] = true
+	s.tenantIndex[key.TenantID][hash] = struct{}{}
 
 	if s.userIndex[key.UserID] == nil {
-		s.userIndex[key.UserID] = make(map[uint64]bool)
+		s.userIndex[key.UserID] = make(map[uint64]struct{})
 	}
-	s.userIndex[key.UserID][hash] = true
+	s.userIndex[key.UserID][hash] = struct{}{}
 
 	if s.resourceIndex[key.Resource] == nil {
-		s.resourceIndex[key.Resource] = make(map[uint64]bool)
+		s.resourceIndex[key.Resource] = make(map[uint64]struct{})
 	}
-	s.resourceIndex[key.Resource][hash] = true
-	s.mu.Unlock()
+	s.resourceIndex[key.Resource][hash] = struct{}{}
 
-	// Update timestamp index (handles its own lock)
-	s.timestampIndex.Add(key.Timestamp, hash)
+	// Write to WAL (while holding store lock for consistency)
+	s.writeWAL("SET", key, value, ttl)
 
 	// Add to TTL heap if has expiration
-	s.mu.Lock()
 	if ttl > 0 {
 		s.ttlHeap.Push(hash, e.insertTime.Add(ttl))
 	}
 
-	// Write to WAL
-	s.writeWAL("SET", key, value, ttl)
 	s.mu.Unlock()
+
+	// Update timestamp index (handles its own lock)
+	s.timestampIndex.Add(key.Timestamp, hash)
 }
 
 func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time.Duration) {
@@ -758,8 +775,13 @@ func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time
 		return
 	}
 
-	// Serialize value to bytes
-	valueBytes := fmt.Appendf(nil, "%v", value)
+	// Serialize value to bytes - avoid fmt for common string case
+	var valueBytes []byte
+	if s, ok := value.(string); ok {
+		valueBytes = []byte(s)
+	} else {
+		valueBytes = fmt.Appendf(nil, "%v", value)
+	}
 
 	// Create WAL entry (simplified without protobuf dependency)
 	// In production, this would use the generated protobuf structs
@@ -795,11 +817,12 @@ func (s *Store) writeWAL(op string, key CompoundKey, value interface{}, ttl time
 	lenBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lenBuf, uint32(len(data)))
 
+	s.walMu.Lock()
 	s.walFile.Write(lenBuf)
 	s.walFile.Write(data)
 	s.walFile.Sync()
-
 	s.walOffset++
+	s.walMu.Unlock()
 }
 
 // Get retrieves a value by exact compound key
@@ -870,14 +893,41 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var candidates map[uint64]bool
+	var candidates map[uint64]struct{}
+	var indexedField string
+
+	// Select index with smallest candidate set for better performance
+	// Check each non-nil field and pick the one with fewest entries
+	minSize := -1
 	if partial.TenantID != nil {
-		candidates = s.tenantIndex[*partial.TenantID]
-	} else if partial.UserID != nil {
-		candidates = s.userIndex[*partial.UserID]
-	} else if partial.Resource != nil {
-		candidates = s.resourceIndex[*partial.Resource]
-	} else {
+		if idx, ok := s.tenantIndex[*partial.TenantID]; ok {
+			if minSize == -1 || len(idx) < minSize {
+				minSize = len(idx)
+				candidates = idx
+				indexedField = "tenant"
+			}
+		}
+	}
+	if partial.UserID != nil {
+		if idx, ok := s.userIndex[*partial.UserID]; ok {
+			if minSize == -1 || len(idx) < minSize {
+				minSize = len(idx)
+				candidates = idx
+				indexedField = "user"
+			}
+		}
+	}
+	if partial.Resource != nil {
+		if idx, ok := s.resourceIndex[*partial.Resource]; ok {
+			if minSize == -1 || len(idx) < minSize {
+				minSize = len(idx)
+				candidates = idx
+				indexedField = "resource"
+			}
+		}
+	}
+
+	if indexedField == "" {
 		// fallback: just check everything if no candidates are found in indicies
 		for _, entry := range s.data {
 			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
@@ -892,15 +942,32 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 		return
 	}
 
+	// Build a simplified match check: skip the field we already indexed by
+	checkTenant := indexedField != "tenant" && partial.TenantID != nil
+	checkUser := indexedField != "user" && partial.UserID != nil
+	checkResource := indexedField != "resource" && partial.Resource != nil
+	checkTimestamp := partial.Timestamp != nil
+
 	for hash := range candidates {
 		if entry, ok := s.data[hash]; ok {
 			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
 				continue
 			}
-			if partial.Matches(entry.key) {
-				if !fn(entry.key, entry.value) {
-					return
-				}
+			// Only check fields not covered by our index selection
+			if checkTenant && *partial.TenantID != entry.key.TenantID {
+				continue
+			}
+			if checkUser && *partial.UserID != entry.key.UserID {
+				continue
+			}
+			if checkResource && *partial.Resource != entry.key.Resource {
+				continue
+			}
+			if checkTimestamp && *partial.Timestamp != entry.key.Timestamp {
+				continue
+			}
+			if !fn(entry.key, entry.value) {
+				return
 			}
 		}
 	}
@@ -908,31 +975,27 @@ func (s *Store) Query(partial PartialKey, fn QueryCallback) {
 
 // RangeQuery finds all entries with timestamps in the given range
 func (s *Store) RangeQuery(startTime, endTime int64, partial PartialKey, fn QueryCallback) {
-	// Get candidates from timestamp index (handles its own lock)
-	var candidateHashes []uint64
-	s.timestampIndex.RangeQuery(startTime, endTime, func(hashs []uint64) bool {
-		candidateHashes = append(candidateHashes, hashs...)
-		return true
-	})
+	s.timestampIndex.RangeQuery(startTime, endTime, func(hashes []uint64) bool {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+		for _, hash := range hashes {
+			if entry, ok := s.data[hash]; ok {
+				// Skip expired entries
+				if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
+					continue
+				}
 
-	for _, hash := range candidateHashes {
-		if entry, ok := s.data[hash]; ok {
-			// Skip expired entries
-			if entry.ttl > 0 && time.Since(entry.insertTime) >= entry.ttl {
-				continue
-			}
-
-			// Apply additional filters from partial key
-			if partial.Matches(entry.key) {
-				if !fn(entry.key, entry.value) {
-					return
+				// Apply additional filters from partial key
+				if partial.Matches(entry.key) {
+					if !fn(entry.key, entry.value) {
+						return false
+					}
 				}
 			}
 		}
-	}
+		return true
+	})
 }
 
 func (s *Store) deleteInternal(hash uint64) {
@@ -963,18 +1026,37 @@ func (s *Store) deleteInternal(hash uint64) {
 func (s *Store) Delete(partial PartialKey) int {
 	s.mu.Lock()
 
-	// Find all matching keys
-	var candidates map[uint64]bool
+	// Find all matching keys with optimal index selection
+	var candidates map[uint64]struct{}
+	minSize := -1
 	if partial.TenantID != nil {
-		candidates = s.tenantIndex[*partial.TenantID]
-	} else if partial.UserID != nil {
-		candidates = s.userIndex[*partial.UserID]
-	} else if partial.Resource != nil {
-		candidates = s.resourceIndex[*partial.Resource]
-	} else {
-		candidates = make(map[uint64]bool)
+		if idx, ok := s.tenantIndex[*partial.TenantID]; ok {
+			if minSize == -1 || len(idx) < minSize {
+				minSize = len(idx)
+				candidates = idx
+			}
+		}
+	}
+	if partial.UserID != nil {
+		if idx, ok := s.userIndex[*partial.UserID]; ok {
+			if minSize == -1 || len(idx) < minSize {
+				minSize = len(idx)
+				candidates = idx
+			}
+		}
+	}
+	if partial.Resource != nil {
+		if idx, ok := s.resourceIndex[*partial.Resource]; ok {
+			if minSize == -1 || len(idx) < minSize {
+				minSize = len(idx)
+				candidates = idx
+			}
+		}
+	}
+	if candidates == nil {
+		candidates = make(map[uint64]struct{})
 		for hash := range s.data {
-			candidates[hash] = true
+			candidates[hash] = struct{}{}
 		}
 	}
 
@@ -1050,7 +1132,12 @@ func (s *Store) CreateSnapshot() error {
 		}
 
 		// Write value (length-prefixed)
-		valueBytes := []byte(fmt.Sprintf("%v", entry.value))
+		var valueBytes []byte
+		if s, ok := entry.value.(string); ok {
+			valueBytes = []byte(s)
+		} else {
+			valueBytes = []byte(fmt.Sprintf("%v", entry.value))
+		}
 		if err := binary.Write(&buf, binary.BigEndian, uint32(len(valueBytes))); err != nil {
 			return fmt.Errorf("failed to write value length: %w", err)
 		}

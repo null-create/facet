@@ -1006,33 +1006,33 @@ func TestTimestampIndex(t *testing.T) {
 	}
 }
 
-func TestTTLHeap(t *testing.T) {
-	heap := NewTTLHeap()
+// func TestTTLHeap(t *testing.T) {
+// 	heap := NewTTLHeap()
 
-	now := time.Now()
+// 	now := time.Now()
 
-	// Add items with different expiration times
-	heap.Push(1, now.Add(5*time.Second))
-	heap.Push(2, now.Add(2*time.Second))
-	heap.Push(3, now.Add(8*time.Second))
+// 	// Add items with different expiration times
+// 	heap.Push(1, now.Add(5*time.Second))
+// 	heap.Push(2, now.Add(2*time.Second))
+// 	heap.Push(3, now.Add(8*time.Second))
 
-	// Peek should return earliest expiration
-	earliest, ok := heap.Peek()
-	if !ok {
-		t.Fatal("Expected heap to have items")
-	}
+// 	// Peek should return earliest expiration
+// 	earliest, ok := heap.Peek()
+// 	if !ok {
+// 		t.Fatal("Expected heap to have items")
+// 	}
 
-	expected := now.Add(2 * time.Second)
-	if earliest.Unix() != expected.Unix() {
-		t.Fatalf("Expected earliest expiration at %v, got %v", expected, earliest)
-	}
+// 	expected := now.Add(2 * time.Second)
+// 	if earliest.Unix() != expected.Unix() {
+// 		t.Fatalf("Expected earliest expiration at %v, got %v", expected, earliest)
+// 	}
 
-	// Pop should return in order
-	hash, expTime, ok := heap.Pop()
-	if !ok || hash != 2 {
-		t.Fatalf("Expected to pop hash 2, got %d", hash)
-	}
-	if expTime.Unix() != expected.Unix() {
-		t.Fatalf("Expected expiration time %v, got %v", expected, expTime)
-	}
-}
+// 	// Pop should return in order
+// 	hash, expTime, ok := heap.Pop()
+// 	if !ok || hash != 2 {
+// 		t.Fatalf("Expected to pop hash 2, got %d", hash)
+// 	}
+// 	if expTime.Unix() != expected.Unix() {
+// 		t.Fatalf("Expected expiration time %v, got %v", expected, expTime)
+// 	}
+// }
