@@ -393,41 +393,41 @@ func BenchmarkKeyHash(b *testing.B) {
 // 			}
 // 		}
 // 	}
+// // }
+
+// // BenchmarkTTLCleanup measures TTL cleanup overhead
+// func BenchmarkTTLCleanup(b *testing.B) {
+// 	store := createBenchTestStore(b)
+// 	defer store.Close()
+
+// 	// Prepopulate with entries that expire quickly
+// 	for i := range 10000 {
+// 		key := CompoundKey{
+// 			TenantID:  uint64(i % 100),
+// 			UserID:    uint64(i),
+// 			Resource:  "resource",
+// 			Timestamp: time.Now().Unix(),
+// 		}
+// 		store.Set(key, "value", 100*time.Millisecond)
+// 	}
+
+// 	for b.Loop() {
+// 		time.Sleep(150 * time.Millisecond)
+// 		// Force cleanup
+// 		store.cleanupExpired()
+
+// 		// Repopulate
+// 		for j := range 1000 {
+// 			key := CompoundKey{
+// 				TenantID:  uint64(j % 100),
+// 				UserID:    uint64(j),
+// 				Resource:  "resource",
+// 				Timestamp: time.Now().Unix(),
+// 			}
+// 			store.Set(key, "value", 100*time.Millisecond)
+// 		}
+// 	}
 // }
-
-// BenchmarkTTLCleanup measures TTL cleanup overhead
-func BenchmarkTTLCleanup(b *testing.B) {
-	store := createBenchTestStore(b)
-	defer store.Close()
-
-	// Prepopulate with entries that expire quickly
-	for i := range 10000 {
-		key := CompoundKey{
-			TenantID:  uint64(i % 100),
-			UserID:    uint64(i),
-			Resource:  "resource",
-			Timestamp: time.Now().Unix(),
-		}
-		store.Set(key, "value", 100*time.Millisecond)
-	}
-
-	for b.Loop() {
-		time.Sleep(150 * time.Millisecond)
-		// Force cleanup
-		store.cleanupExpired()
-
-		// Repopulate
-		for j := range 1000 {
-			key := CompoundKey{
-				TenantID:  uint64(j % 100),
-				UserID:    uint64(j),
-				Resource:  "resource",
-				Timestamp: time.Now().Unix(),
-			}
-			store.Set(key, "value", 100*time.Millisecond)
-		}
-	}
-}
 
 // Benchmark for mixed workload (realistic usage)
 func BenchmarkMixedWorkload(b *testing.B) {
